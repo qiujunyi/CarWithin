@@ -13,10 +13,10 @@ final class ZeehoOutput {
 
     deinit { stop() }
 
-    func start(localAddress: String, targetAddress: String, phone: TailingPhoneInfo, onState: @escaping (String) -> Void,
+    func start(localAddress: String, targetAddress: String, phone: TailingPhoneInfo, cfmotoDiagnostic: Bool = false, onState: @escaping (String) -> Void,
                onLog: @escaping (String) -> Void, requestKeyframe: @escaping () -> Void) {
         stop()
-        let next = Session(queue: queue, localAddress: localAddress, targetAddress: targetAddress, phone: phone, onState: onState, onLog: onLog, requestKeyframe: requestKeyframe)
+        let next = Session(queue: queue, localAddress: localAddress, targetAddress: targetAddress, phone: phone, cfmotoDiagnostic: cfmotoDiagnostic, onState: onState, onLog: onLog, requestKeyframe: requestKeyframe)
         session = next
         next.start()
     }
@@ -65,18 +65,18 @@ final class ZeehoOutput {
         private var sentPicture = false
         private var status = ""
 
-        init(queue: DispatchQueue, localAddress: String, targetAddress: String, phone: TailingPhoneInfo, onState: @escaping (String) -> Void, onLog: @escaping (String) -> Void,
+        init(queue: DispatchQueue, localAddress: String, targetAddress: String, phone: TailingPhoneInfo, cfmotoDiagnostic: Bool, onState: @escaping (String) -> Void, onLog: @escaping (String) -> Void,
              requestKeyframe: @escaping () -> Void) {
             self.queue = queue
             self.connection = TailingConnection(localIP: localAddress, targetIP: targetAddress,
-                profile: .zeeho62, phone: phone, log: onLog)
+                profile: cfmotoDiagnostic ? .cfmoto150scf : .zeeho62, phone: phone, log: onLog)
             self.onState = onState
             self.onLog = onLog
             self.requestKeyframe = requestKeyframe
         }
 
         func start() {
-            report("正在连接极核仪表…")
+            report("正在连接仪表（实验性 PXC 协议）…")
             DispatchQueue.global(qos: .userInitiated).async { [self] in
                 do {
                     try connection.start()
