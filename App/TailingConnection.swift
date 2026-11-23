@@ -60,6 +60,9 @@ final class TailingConnection: @unchecked Sendable {
     private var sentH264Prefix = false
     private var mediaStarted = false
     private var configured = false
+    // Observe which dashboard channels actually connect; these flags do not affect negotiation.
+    private var controlConnected = false
+    private var auxiliaryConnected = false
     private var isZeeho: Bool { profile.isZeeho }
     private var dashboard: String { profile.isCFMotoDiagnostic ? "春风150SC-F诊断" : (profile.isZeeho ? "极核" : "台铃") }
 
@@ -93,7 +96,14 @@ final class TailingConnection: @unchecked Sendable {
         try announcement.write(TailingProtocol.control(0x70000010, payload: TailingProtocol.json([
             "phoneType": "iOS", "packageName": phone.package
         ])))
+        if profile.isCFMotoDiagnostic {
+            log(String(format: "PXC TX %d: cmd=0x70000010（不记录请求载荷）", Int(ports.announcement)))
+        }
         let reply = try TailingProtocol.readControl { try announcement.readExactly($0, timeout: 3) }
+        if profile.isCFMotoDiagnostic {
+            log(String(format: "PXC RX %d: cmd=0x%08x, bytes=%d",
+                       Int(ports.announcement), reply.command, reply.payload.count))
+        }
         guard reply.command == 0x70000011,
               try TailingProtocol.object(reply.payload)["status"] as? Bool == true else {
             throw TailingError.protocolFailure("仪表未接受 iOS 投屏请求")
@@ -102,7 +112,10 @@ final class TailingConnection: @unchecked Sendable {
         condition.lock()
         defer { condition.unlock() }
         while !closed && failure == nil && (signedHUID == nil || video == nil || !mediaStarted || (isZeeho && reverseControl == nil)) {
-            if !condition.wait(until: deadline) { throw TailingError.timeout("媒体会话未就绪，请退出官方投屏并重新开启仪表投屏") }
+            if !condition.wait(until: deadline) {
+                let state = profile.isCFMotoDiagnostic ? "；" + diagnosticStateLocked() : ""
+                throw TailingError.timeout("媒体会话未就绪" + state + "，请退出官方投屏并重新开启仪表投屏")
+            }
         }
         try checkLocked()
         log("\(dashboard) 媒体协商完成，等待仪表逐帧请求")
@@ -211,11 +224,21 @@ final class TailingConnection: @unchecked Sendable {
         return socket
     }
 
+    /// Call with condition locked. Never includes HUID, certificates, tokens or QR credentials.
+    private func diagnosticStateLocked() -> String {
+        "身份=\(signedHUID == nil ? "未回应" : "已回应")；控制=\(controlConnected ? "已连接" : "未连接")；媒体控制=\(auxiliaryConnected ? "已连接" : "未连接")；媒体配置=\(configured ? "完成" : "未完成")；媒体启动=\(mediaStarted ? "完成" : "未完成")；视频=\(video == nil ? "未连接" : "已连接")；镜像控制=\(reverseControl == nil ? "未就绪" : "已发送")"
+    }
+
     private func accept(_ server: TailingSocket, port: UInt16) {
         do {
             while true {
                 let socket = try tracked(server.accept(remoteIP: targetIP))
                 if isZeeho { log("\(dashboard) TCP\(port) 已回连") }
+                condition.lock()
+                if port == ports.control { controlConnected = true }
+                if port == ports.auxiliary { auxiliaryConnected = true }
+                condition.broadcast()
+                condition.unlock()
                 if port == ports.video {
                     condition.lock()
                     if video == nil && !closed { video = socket; condition.broadcast() }
@@ -245,6 +268,10 @@ final class TailingConnection: @unchecked Sendable {
             let request = try TailingProtocol.readControl { count in
                 defer { readingHeader = false }
                 return try socket.readExactly(count, waitForFirstByte: readingHeader)
+            }
+            if profile.isCFMotoDiagnostic && request.command != 0x70000000 {
+                log(String(format: "PXC RX %d: cmd=0x%08x, id=%u, bytes=%d",
+                           Int(ports.control), request.command, request.identifier, request.payload.count))
             }
             var payload = Data()
             switch request.command {
@@ -297,7 +324,7 @@ final class TailingConnection: @unchecked Sendable {
                 // 仍等待身份、媒体配置与启动三个必要条件，不触发额外状态发送。
                 if !reportedUnsupported {
                     reportedUnsupported = true
-                    log("仪表报告不支持某项控制消息，继续核对必要媒体协商")
+                    log(String(format: "仪表报告不支持控制消息（id=%u）；继续等待媒体协商", request.identifier))
                 }
                 continue
             case 0x20021, 0x20031, 0x204c1, 0x20491, 0x20051, 0x20591, 0x205a1, 0x70000001:
@@ -320,12 +347,22 @@ final class TailingConnection: @unchecked Sendable {
     }
 
     private func replyControl(_ socket: TailingSocket, _ request: TailingProtocol.Control, payload: Data) throws {
-        try socket.write(TailingProtocol.control(request.command &+ 1, identifier: request.identifier, payload: payload))
+        let command = request.command &+ 1
+        try socket.write(TailingProtocol.control(command, identifier: request.identifier, payload: payload))
+        if profile.isCFMotoDiagnostic {
+            log(String(format: "PXC TX %d: cmd=0x%08x, id=%u, bytes=%d",
+                       Int(ports.control), command, request.identifier, payload.count))
+        }
     }
 
     private func sendControl(_ socket: TailingSocket, command: UInt32, identifier: UInt32,
                              object: [String: Any]) throws {
-        try socket.write(TailingProtocol.control(command, identifier: identifier, payload: TailingProtocol.json(object)))
+        let payload = try TailingProtocol.json(object)
+        try socket.write(TailingProtocol.control(command, identifier: identifier, payload: payload))
+        if profile.isCFMotoDiagnostic {
+            log(String(format: "PXC TX %d: cmd=0x%08x, id=%u, bytes=%d",
+                       Int(ports.control), command, identifier, payload.count))
+        }
     }
 
     private func startZeehoMirror(_ socket: TailingSocket) throws {
@@ -335,7 +372,7 @@ final class TailingConnection: @unchecked Sendable {
         guard reverseControl == nil else { return }
         try sendMirrorControl(socket, start: true, identifier: 6, timeout: 0.25)
         reverseControl = socket
-        log("极核已发送开始投屏通知")
+        log("\(dashboard) 已发送 0x20590 开始投屏通知（尚未确认媒体通道）")
         condition.broadcast()
     }
 
@@ -373,6 +410,10 @@ final class TailingConnection: @unchecked Sendable {
             let request = try TailingProtocol.readAuxiliary { count in
                 defer { readingHeader = false }
                 return try socket.readExactly(count, waitForFirstByte: readingHeader)
+            }
+            if profile.isCFMotoDiagnostic {
+                log(String(format: "PXC RX %d: cmd=0x%04x, bytes=%d",
+                           Int(ports.auxiliary), request.command, request.payload.count))
             }
             var payload = Data()
             let response: UInt16
@@ -415,6 +456,7 @@ final class TailingConnection: @unchecked Sendable {
                 guard ready else { throw TailingError.protocolFailure("仪表在配置完成前请求媒体启动") }
                 try socket.write(TailingProtocol.auxiliary(0x71, token: request.token))
                 condition.lock(); mediaStarted = true; condition.broadcast(); condition.unlock()
+                if profile.isCFMotoDiagnostic { log("PXC TX 媒体控制：0x71 启动确认") }
                 continue
             case 0x40: response = 0x41
             case 0x30:
@@ -427,6 +469,10 @@ final class TailingConnection: @unchecked Sendable {
                 log(String(format: "媒体控制通道暂不支持 0x%04x", request.command))
             }
             try socket.write(TailingProtocol.auxiliary(response, token: request.token, payload: payload))
+            if profile.isCFMotoDiagnostic {
+                log(String(format: "PXC TX %d: cmd=0x%04x, bytes=%d",
+                           Int(ports.auxiliary), response, payload.count))
+            }
         }
     }
 
