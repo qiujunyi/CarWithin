@@ -118,12 +118,12 @@ final class ZeehoOutput {
                             guard let recovered else { throw TailingError.timeout("等待 H.264 编码画面") }
                             try connection.sendH264(recovered.data)
                             first = false
-                            report("正在投屏 · 1024×\\(videoHeight) · H.264")
+                            report("正在投屏 · 1024×\(videoHeight) · H.264")
                             continue
                         }
                         try connection.sendH264(result.data)
                         first = false
-                        report("正在投屏 · 1024×\\(videoHeight) · H.264")
+                        report("正在投屏 · 1024×\(videoHeight) · H.264")
                     }
                 } catch {
                     if active {
