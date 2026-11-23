@@ -171,10 +171,10 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     private lazy var pictureInPicture = CarPlayPictureInPicture(surface: videoSurface)
     private let keepAlive = BackgroundKeepAlive()
     private let keepAliveSwitch = UISwitch()
-    private let headUnitOutput = ChoiceMenu(items: ["浏览器", "CarLife", "AirPlay", "台铃 4.3 寸", "九号 5 寸", "极核 6.2 寸"])
+    private let headUnitOutput = ChoiceMenu(items: ["浏览器", "CarLife", "AirPlay", "台铃 4.3 寸", "九号 5 寸", "极核 6.2 寸", "春风 150SC-F（诊断）"])
     private enum HeadUnitOutput: Int {
-        case browser, carLife, airPlay, tailing, ninebot, zeeho
-        var usesInstrumentWiFi: Bool { self == .tailing || self == .ninebot || self == .zeeho }
+        case browser, carLife, airPlay, tailing, ninebot, zeeho, cfmoto
+        var usesInstrumentWiFi: Bool { self == .tailing || self == .ninebot || self == .zeeho || self == .cfmoto }
     }
     private var airPlayStreamID: UUID?
     private var airPlayStreamURL: URL?
@@ -420,8 +420,8 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         carLifeCard.addArrangedSubview(carLifeSettings)
         stack.addArrangedSubview(carLifeCard)
 
-        configureConnectionCard(zeehoCard, title: "极核 6.2 寸连接", symbol: "scooter", color: .systemBlue,
-            instructions: "让 iPhone 加入极核仪表 Wi-Fi，打开仪表投屏后启动 CarPlay。", status: zeehoCardStatus)
+        configureConnectionCard(zeehoCard, title: "仪表 6.2 寸连接", symbol: "scooter", color: .systemBlue,
+            instructions: "选择极核或春风诊断模式，连接对应仪表 Wi-Fi 后启动。春风模式仅供协议测试。", status: zeehoCardStatus)
         let zeehoSettings = UIButton(type: .system)
         zeehoSettings.configuration = .tinted()
         zeehoSettings.configuration?.title = "连接设置"
@@ -567,7 +567,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
             self?.refreshFullscreenExitButton()
         }
         receiver.onZeehoState = { [weak self] message in
-            guard let self, self.running, self.outputMode == .zeeho else { return }
+            guard let self, self.running, (self.outputMode == .zeeho || self.outputMode == .cfmoto) else { return }
             self.updateZeehoStatus(message)
         }
         receiver.onNinebotState = { [weak self] message in
@@ -753,7 +753,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     /// Size, frame rate and codec for the next session from the settings, the known head-unit
     /// screen and any lighter level chosen by "自动重启".
     private func planDisplay(for screen: CarScreen?) -> DisplayPlan {
-        if outputMode == .zeeho {
+        if outputMode == .zeeho || outputMode == .cfmoto {
             let icon = ReceiverConfiguration.iconSizes[max(0, iconSizeControl.selectedSegmentIndex)].widthMM
             return DisplayPlan(width: 1024, height: 480, fps: 30, codec: .h264, iconWidthMM: icon)
         }
@@ -989,7 +989,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         secureVideoOutputPortField.placeholder = String(defaultSecurePort)
         portStatus.text = browserPortError ?? (running ? "停止 CarPlay 后可修改端口。" : "启动 CarPlay 后即可打开上方地址。")
         let showsLocalOutput = modeControl.selectedSegmentIndex != 2
-        zeehoCard.isHidden = !showsLocalOutput || outputMode != .zeeho
+        zeehoCard.isHidden = !showsLocalOutput || !(outputMode == .zeeho || outputMode == .cfmoto)
         if !running { updateZeehoStatus("等待启动 CarPlay · 仪表 IP：\(zeehoAddressField.text ?? "192.168.0.1")") }
         ninebotCard.isHidden = !showsLocalOutput || outputMode != .ninebot
         if !running { updateNinebotStatus("等待启动 CarPlay · 仪表 IP：\(ninebotAddressField.text ?? "")") }
@@ -1044,7 +1044,8 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         log("画面计划：\(plan.width)×\(plan.height) @ \(plan.fps) FPS \(plan.codec.displayName)（\(source)\(lightLevel > 0 ? "，减轻档 \(lightLevel)" : "")）")
         config.browserAudio = soundOutput == .browser && config.videoOutputPort != nil && outputMode == .browser
         if outputMode == .airPlay, config.videoOutputPort != nil { config.airPlayStreamID = UUID() }
-        if outputMode == .zeeho {
+        if outputMode == .zeeho || outputMode == .cfmoto {
+            config.cfmotoDiagnostic = outputMode == .cfmoto
             config.zeehoAddress = (zeehoAddressField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         }
         if outputMode == .ninebot {
@@ -2190,9 +2191,9 @@ extension ReceiverViewController {
 
     fileprivate func displayPage() -> SettingsPageController {
         page("画面") { [unowned self] in
-            if outputMode == .zeeho {
+            if outputMode == .zeeho || outputMode == .cfmoto {
                 return [
-                    SettingsSection("极核 6.2 寸", [.info("仪表画面", "1024×480 · H.264 · 25 FPS")]),
+                    SettingsSection(outputMode == .cfmoto ? "春风 150SC-F（诊断）" : "极核 6.2 寸", [.info("仪表画面", "1024×480 · H.264 · 25 FPS")]),
                     SettingsSection("图标", [.control("CarPlay 图标大小", icon: ("square.grid.2x2.fill", .systemPurple), iconSizeControl)])
                 ]
             }
@@ -2514,6 +2515,11 @@ extension ReceiverViewController {
             case .carLife: return carLifeOutputSections()
             case .airPlay: return airPlayOutputSections()
             case .tailing: return tailingOutputSections()
+            case .cfmoto:
+                return [SettingsSection("春风 150SC-F（实验诊断）", footer: "仅测试 PXC 协议是否兼容；MotoPlay 全屏镜像不代表此协议或 CarPlay 已适配。请连接 CFMOTO 仪表 Wi-Fi 后观察日志。", [
+                    .field("仪表 IP 地址", zeehoAddressField, placeholder: "192.168.0.1"),
+                    .note(zeehoStatus)
+                ])]
             case .zeeho:
                 return [SettingsSection("极核 AE4 MAX2+ 6.2 寸", footer: "让 iPhone 加入仪表 Wi-Fi，选择同名预设。结束其他投屏，打开仪表投屏后启动 CarPlay。声音由 iPhone 或蓝牙输出。", [
                     .field("仪表 IP 地址", zeehoAddressField, placeholder: "192.168.0.1"),
@@ -2538,7 +2544,7 @@ extension ReceiverViewController {
     }
 
     private func prepareExternalOutput(configuration: ReceiverConfiguration) {
-        if configuration.zeehoAddress != nil { updateZeehoStatus("正在连接极核仪表…") }
+        if configuration.zeehoAddress != nil { updateZeehoStatus(configuration.cfmotoDiagnostic ? "正在连接春风仪表（实验诊断）…" : "正在连接极核仪表…") }
         if configuration.ninebotAddress != nil { updateNinebotStatus("正在连接九号仪表…") }
         if configuration.tailingAddress != nil { updateTailingStatus("正在连接台铃仪表…") }
         if configuration.carLifeEnabled {
