@@ -3,8 +3,11 @@ struct TailingDisplayProfile {
     let width: Int
     let height: Int
     let isZeeho: Bool
-    static let tailing43 = TailingDisplayProfile(width: 480, height: 272, isZeeho: false)
-    static let zeeho62 = TailingDisplayProfile(width: 1024, height: 480, isZeeho: true)
+    let isCFMotoDiagnostic: Bool
+    static let tailing43 = TailingDisplayProfile(width: 480, height: 272, isZeeho: false, isCFMotoDiagnostic: false)
+    static let zeeho62 = TailingDisplayProfile(width: 1024, height: 480, isZeeho: true, isCFMotoDiagnostic: false)
+    // Experimental PXC diagnostic profile. Not evidence of CFMOTO protocol compatibility.
+    static let cfmoto150scf = TailingDisplayProfile(width: 1024, height: 480, isZeeho: true, isCFMotoDiagnostic: true)
 }
 
 import Foundation
@@ -58,7 +61,7 @@ final class TailingConnection: @unchecked Sendable {
     private var mediaStarted = false
     private var configured = false
     private var isZeeho: Bool { profile.isZeeho }
-    private var dashboard: String { profile.isZeeho ? "极核" : "台铃" }
+    private var dashboard: String { profile.isCFMotoDiagnostic ? "春风150SC-F诊断" : (profile.isZeeho ? "极核" : "台铃") }
 
     init(localIP: String, targetIP: String, profile: TailingDisplayProfile, phone: TailingPhoneInfo,
          ports: TailingPorts = .ios, identityProvider: @escaping () throws -> TailingIdentity = TailingIdentity.load,
@@ -68,6 +71,9 @@ final class TailingConnection: @unchecked Sendable {
     }
 
     func start() throws {
+        if profile.isCFMotoDiagnostic {
+            log("春风诊断模式：实验性 PXC 协商；编码尺寸 1024×480，仪表媒体尺寸将单独记录")
+        }
         let loaded = try identityProvider()
         condition.lock(); identity = loaded; condition.unlock()
         // 先全部监听，再请求仪表反向连接；不使用所有网卡的通配地址。
@@ -209,7 +215,7 @@ final class TailingConnection: @unchecked Sendable {
         do {
             while true {
                 let socket = try tracked(server.accept(remoteIP: targetIP))
-                if isZeeho { log("极核 TCP\(port) 已回连") }
+                if isZeeho { log("\(dashboard) TCP\(port) 已回连") }
                 if port == ports.video {
                     condition.lock()
                     if video == nil && !closed { video = socket; condition.broadcast() }
@@ -377,8 +383,13 @@ final class TailingConnection: @unchecked Sendable {
                 }
                 let width = request.payload.uint16LE(0)
                 let height = request.payload.uint16LE(2)
-                let validDimensions = isZeeho ? width == 1024 && (height == 480 || height == 488)
-                    : width == 480 && height == 272
+                if profile.isCFMotoDiagnostic {
+                    log("春风媒体配置请求：报告尺寸 \(width)×\(height)；视频编码保持 \(profile.width)×\(profile.height)")
+                }
+                let validDimensions = profile.isCFMotoDiagnostic
+                    ? width == 1024 && (height == 480 || height == 488 || height == 515)
+                    : (isZeeho ? width == 1024 && (height == 480 || height == 488)
+                       : width == 480 && height == 272)
                 guard validDimensions else {
                     throw TailingError.protocolFailure("仪表媒体尺寸 \(width)×\(height) 与 \(dashboard) 配置不符")
                 }
