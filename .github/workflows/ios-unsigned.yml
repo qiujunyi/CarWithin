@@ -46,6 +46,25 @@ jobs:
             TDS_WIFI_ENTITLEMENTS="" \
             build
 
+      - name: Verify original CarPlay authentication flow is preserved
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          identity = Path("App/AccessoryIdentityStore.swift").read_text()
+          mfi = Path("Sources/TDSCarKitCore/MFiSAP.swift").read_text()
+          receiver = Path("App/ReceiverViewController.swift").read_text()
+          output = Path("App/ZeehoOutput.swift").read_text()
+          assert "static func loadFromBundle()" in identity
+          assert "static func importFromDocuments()" in identity
+          assert "public static func respond(to request: Data, identity: AccessoryIdentity)" in mfi
+          assert "private func loadIdentity()" in receiver
+          assert "case .cfmoto:" in receiver
+          assert "cfmotoDiagnostic ? .cfmoto150scf : .zeeho62" in output
+          print("Verified: original identity import and MFiSAP code paths remain present; CFMOTO output is separate.")
+          PY
+
       - name: Package unsigned IPA
         shell: bash
         run: |
