@@ -1,0 +1,67 @@
+name: Build unsigned iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ios-unsigned.yml'
+      - 'App/**'
+      - 'Sources/**'
+      - 'ThirdParty/**'
+      - 'TDSCarKit.xcodeproj/**'
+      - 'Package.swift'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Print environment
+        run: |
+          xcodebuild -version
+          xcodebuild -list -project TDSCarKit.xcodeproj
+
+      - name: Build for physical iPhone without signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project TDSCarKit.xcodeproj \
+            -scheme TDSCarKit \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/CarWithinDerived" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            TDS_WIFI_ENTITLEMENTS="" \
+            build
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/CarWithinDerived/Build/Products/Release-iphoneos/TDSCarKit.app"
+          test -d "$APP"
+          mkdir -p "$RUNNER_TEMP/CarWithinIPA/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/CarWithinIPA/Payload/"
+          cd "$RUNNER_TEMP/CarWithinIPA"
+          /usr/bin/zip -qr "$GITHUB_WORKSPACE/CarWithin-unsigned.ipa" Payload
+          unzip -l "$GITHUB_WORKSPACE/CarWithin-unsigned.ipa" | head -n 25
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: CarWithin-unsigned-ipa
+          path: CarWithin-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
