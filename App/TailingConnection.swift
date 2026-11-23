@@ -58,6 +58,7 @@ final class TailingConnection: @unchecked Sendable {
     private var video: TailingSocket?
     private var reverseControl: TailingSocket?
     private var sentH264Prefix = false
+    private var cfmotoVideoFrameIndex: UInt32 = 0
     private var mediaStarted = false
     private var configured = false
     // Observe which dashboard channels actually connect; these flags do not affect negotiation.
@@ -101,24 +102,35 @@ final class TailingConnection: @unchecked Sendable {
         let announcement = try tracked(TailingSocket.create())
         defer { announcement.close() }
         try announcement.connect(localIP: localIP, remoteIP: targetIP, port: ports.announcement)
-        // The known legacy modelId 37416 implementation advertises the Android
-        // EasyConn transport profile. This affects PXC only, not iOS CarPlay.
-        let pxcType = profile.isCFMotoDiagnostic ? "Android" : "iOS"
-        let pxcPackage = profile.isCFMotoDiagnostic ? "com.cfmoto.cfmotointernational" : phone.package
-        try announcement.write(TailingProtocol.control(0x70000010, payload: TailingProtocol.json([
-            "phoneType": pxcType, "packageName": pxcPackage
-        ])))
         if profile.isCFMotoDiagnostic {
-            log(String(format: "PXC TX %d: cmd=0x70000010（不记录请求载荷）", Int(ports.announcement)))
-        }
-        let reply = try TailingProtocol.readControl { try announcement.readExactly($0, timeout: 3) }
-        if profile.isCFMotoDiagnostic {
-            log(String(format: "PXC RX %d: cmd=0x%08x, bytes=%d",
-                       Int(ports.announcement), reply.command, reply.payload.count))
-        }
-        guard reply.command == 0x70000011,
-              try TailingProtocol.object(reply.payload)["status"] as? Bool == true else {
-            throw TailingError.protocolFailure("仪表未接受 PXC 投屏请求")
+            // Successful CFDL16 log: EasyConn init 0x10 -> 0x11 on 10930.
+            // This differs from a PXC wake probe 0x70000010 (disabled on Android).
+            let packet = try TailingProtocol.easyConnInit(
+                phoneType: "Android", packageName: "com.lxt.cfmoto")
+            try announcement.write(packet)
+            log("春风 EasyConn 初始化 TX 10930：0x10")
+            let header = try announcement.readExactly(16, timeout: 5)
+            guard header.count == 16 else {
+                throw TailingError.protocolFailure("春风 EasyConn 初始化回应头不完整")
+            }
+            let responseCommand = header.uint16LE(0)
+            let responseLength = Int(header.uint16LE(4))
+            guard responseCommand == 0x11, (16...4096).contains(responseLength) else {
+                throw TailingError.protocolFailure("春风 EasyConn 未确认 0x11 初始化")
+            }
+            if responseLength > 16 {
+                _ = try announcement.readExactly(responseLength - 16, timeout: 5)
+            }
+            log("春风 EasyConn 初始化 RX 10930：0x11，等待仪表回连")
+        } else {
+            try announcement.write(TailingProtocol.control(0x70000010, payload: TailingProtocol.json([
+                "phoneType": "iOS", "packageName": phone.package
+            ])))
+            let reply = try TailingProtocol.readControl { try announcement.readExactly($0, timeout: 3) }
+            guard reply.command == 0x70000011,
+                  try TailingProtocol.object(reply.payload)["status"] as? Bool == true else {
+                throw TailingError.protocolFailure("仪表未接受 PXC 投屏请求")
+            }
         }
         let deadline = Date().addingTimeInterval(20)
         condition.lock()
@@ -153,7 +165,13 @@ final class TailingConnection: @unchecked Sendable {
     // 视频请求与发送由同一个会话任务顺序执行。
     func sendH264(_ accessUnit: Data) throws {
         let socket = try videoSocket()
-        let packet = try TailingProtocol.h264(accessUnit, includePrefix: !sentH264Prefix && !profile.isCFMotoDiagnostic)
+        let packet: Data
+        if profile.isCFMotoDiagnostic {
+            packet = try TailingProtocol.h264Indexed(accessUnit, frameIndex: cfmotoVideoFrameIndex)
+            cfmotoVideoFrameIndex = (cfmotoVideoFrameIndex &+ 1) & 0x7fff_ffff
+        } else {
+            packet = try TailingProtocol.h264(accessUnit, includePrefix: !sentH264Prefix)
+        }
         do {
             try socket.write(packet)
             sentH264Prefix = true
@@ -436,7 +454,7 @@ final class TailingConnection: @unchecked Sendable {
                 throw TailingError.protocolFailure(String(format: "未支持的协商命令 0x%08x", request.command))
             }
             try replyControl(socket, request, payload: payload)
-            if profile.isCFMotoDiagnostic && !heartbeatStarted &&
+            if !profile.isCFMotoDiagnostic && !heartbeatStarted &&
                 (request.command == 0x10000 || request.command == 0x20000) {
                 // Some MotoPlay HUs require heartbeat on both independent
                 // CAR_CTRL and CAR_DATA sockets, not only the second socket.
@@ -565,10 +583,12 @@ final class TailingConnection: @unchecked Sendable {
                         log(echoed == signature ? "春风媒体身份回显匹配" : "春风媒体配置携带非匹配扩展，继续兼容协商")
                     }
                     payload.appendLE(UInt32(2)) // H.264
-                    payload.appendLE(UInt16(profile.width))
-                    payload.appendLE(UInt16(profile.height))
+                    let alignedWidth = width & ~UInt16(15)
+                    let alignedHeight = height & ~UInt16(15)
+                    payload.appendLE(alignedWidth)
+                    payload.appendLE(alignedHeight)
                     payload.append(request.payload.count > 29 ? request.payload[29] : UInt8(0))
-                    log("春风媒体配置：请求编码器=\(requestedEncoder)，回报 H.264 / \(profile.width)×\(profile.height)，扩展位=\(payload[8])")
+                    log("春风媒体配置：请求编码器=\(requestedEncoder)，回报 H.264 / \(alignedWidth)×\(alignedHeight)，扩展位=\(payload[8])")
                 } else {
                     let deadline = Date().addingTimeInterval(5)
                     condition.lock()
