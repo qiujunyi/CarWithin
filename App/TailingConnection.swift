@@ -329,7 +329,13 @@ final class TailingConnection: @unchecked Sendable {
                         if let n = value as? NSNumber { return n.stringValue }
                         return "已提供"
                     }
-                    log("春风仪表协议能力：sdkVersion=\(field("sdkVersion"))，pxcVersion=\(field("pxcVersion"))，mirrorMode=\(field("mirrorMode"))，productType=\(field("productType"))，screenType=\(field("screenType"))，supportScreenMirroring=\(field("supportScreenMirroring"))，enableSockServerAuth=\(field("enableSockServerAuth"))")
+                    // Show only harmless firmware metadata; never log HUID, pairing
+                    // serial number, Wi-Fi credentials or user-defined identifiers.
+                    func version(_ key: String) -> String {
+                        guard let value = object[key] as? String else { return "未提供" }
+                        return String(value.prefix(24)).replacingOccurrences(of: "\n", with: " ")
+                    }
+                    log("春风仪表协议能力：sdkVersion=\(version("sdkVersion"))，pxcVersion=\(version("pxcVersion"))，mirrorMode=\(field("mirrorMode"))，productType=\(field("productType"))，screenType=\(field("screenType"))，supportScreenMirroring=\(field("supportScreenMirroring"))，enableSockServerAuth=\(field("enableSockServerAuth"))")
                 }
                 let signature = try identity.sign(huid)
                 if profile.isCFMotoDiagnostic {
@@ -378,6 +384,9 @@ final class TailingConnection: @unchecked Sendable {
                     reportedUnsupported = true
                     log(String(format: "仪表报告不支持控制消息（id=%u）；继续等待媒体协商", request.identifier))
                 }
+                continue
+            case 0x201c1 where profile.isCFMotoDiagnostic:
+                log("春风 PXC 仪表已确认 0x201c0 CHECK_SN_RESULT，等待媒体通道")
                 continue
             case 0x20021, 0x20031, 0x204c1, 0x20491, 0x20051, 0x20591, 0x205a1, 0x201c1, 0x70000001:
                 continue // 回应不再回应，避免往返循环。
