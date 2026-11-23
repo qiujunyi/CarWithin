@@ -311,6 +311,14 @@ final class TailingConnection: @unchecked Sendable {
                 }
                 condition.lock(); let identity = self.identity; condition.unlock()
                 guard let identity else { throw TailingError.closed }
+                if profile.isCFMotoDiagnostic {
+                    func field(_ key: String) -> String {
+                        guard let value = object[key] else { return "未提供" }
+                        if let n = value as? NSNumber { return n.stringValue }
+                        return "已提供"
+                    }
+                    log("春风仪表协议能力：sdkVersion=\(field("sdkVersion"))，pxcVersion=\(field("pxcVersion"))，mirrorMode=\(field("mirrorMode"))，productType=\(field("productType"))，screenType=\(field("screenType"))，supportScreenMirroring=\(field("supportScreenMirroring"))，enableSockServerAuth=\(field("enableSockServerAuth"))")
+                }
                 let signature = try identity.sign(huid)
                 payload = try TailingProtocol.json([
                     "pxcVersion": "1.0.2", "phoneUUID": identity.phoneID,
