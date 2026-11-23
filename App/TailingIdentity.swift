@@ -46,10 +46,16 @@ struct TailingIdentity {
         return identity
     }
 
-    static func generate() throws -> TailingIdentity {
+    static func generate(keySizeInBits: Int = 2048) throws -> TailingIdentity {
+        // Keep the persisted 2048-bit identity unchanged for Tailing/Zeeho.
+        // The separate CFMOTO legacy PXC profile uses a throwaway 1024-bit key
+        // matching EasyConn implementations. This key is unrelated to MFi.
+        guard keySizeInBits == 1024 || keySizeInBits == 2048 else {
+            throw TailingError.protocolFailure("无效的 PXC RSA 密钥长度")
+        }
         var error: Unmanaged<CFError>?
         guard let key = SecKeyCreateRandomKey([
-            kSecAttrKeyType: kSecAttrKeyTypeRSA, kSecAttrKeySizeInBits: 2048
+            kSecAttrKeyType: kSecAttrKeyTypeRSA, kSecAttrKeySizeInBits: keySizeInBits
         ] as CFDictionary, &error) else { throw error!.takeRetainedValue() }
         return TailingIdentity(key: key, phoneID: UUID().uuidString)
     }
