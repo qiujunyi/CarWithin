@@ -78,7 +78,6 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     /// The settings sheet while it is shown.
     private weak var settingsNavigation: UINavigationController?
     private let transportProbeButton = UIButton(type: .system)
-    private let cfmotoProbeButton = UIButton(type: .system)
     private let orientationControl = ChoiceMenu(items: ["横屏", "竖屏"])
     private let wifiPathMonitor = NWPathMonitor(requiredInterfaceType: .wifi)
     private var networkStartupTask: Task<Void, Never>?
@@ -173,7 +172,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     private lazy var pictureInPicture = CarPlayPictureInPicture(surface: videoSurface)
     private let keepAlive = BackgroundKeepAlive()
     private let keepAliveSwitch = UISwitch()
-    private let headUnitOutput = ChoiceMenu(items: ["浏览器", "CarLife", "AirPlay", "台铃 4.3 寸", "九号 5 寸", "极核 6.2 寸", "春风 150SC-F（诊断）"])
+    private let headUnitOutput = ChoiceMenu(items: ["浏览器", "CarLife", "AirPlay", "台铃 4.3 寸", "九号 5 寸", "极核 6.2 寸", "春风 150SC-F"])
     private enum HeadUnitOutput: Int {
         case browser, carLife, airPlay, tailing, ninebot, zeeho, cfmoto
         var usesInstrumentWiFi: Bool { self == .tailing || self == .ninebot || self == .zeeho || self == .cfmoto }
@@ -423,7 +422,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         stack.addArrangedSubview(carLifeCard)
 
         configureConnectionCard(zeehoCard, title: "仪表 6.2 寸连接", symbol: "scooter", color: .systemBlue,
-            instructions: "选择极核或春风诊断模式，连接对应仪表 Wi-Fi 后启动。春风模式仅供协议测试。", status: zeehoCardStatus)
+            instructions: "选择极核或春风 150SC-F，连接对应仪表 Wi-Fi 后启动 CarPlay。", status: zeehoCardStatus)
         let zeehoSettings = UIButton(type: .system)
         zeehoSettings.configuration = .tinted()
         zeehoSettings.configuration?.title = "连接设置"
@@ -512,8 +511,6 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         logView.backgroundColor = .secondarySystemBackground; logView.layer.cornerRadius = 12
         logView.heightAnchor.constraint(equalToConstant: 220).isActive = true
         transportProbeButton.addTarget(self, action: #selector(testSameDeviceTransport), for: .touchUpInside)
-        cfmotoProbeButton.setTitle("测试春风握手端口（无需 MFi）", for: .normal)
-        cfmotoProbeButton.addTarget(self, action: #selector(testCFMotoPort), for: .touchUpInside)
         stack.axis = .vertical; stack.spacing = 16; stack.translatesAutoresizingMaskIntoConstraints = false
         let scroll = UIScrollView(); scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.keyboardDismissMode = .interactive
@@ -1305,33 +1302,6 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         if modeControl.selectedSegmentIndex != 2 { UserDefaults.standard.set(config.name, forKey: "receiverName") }
         return true
     }
-    // A standalone network-only diagnostic. This does not claim to authenticate or start CarPlay.
-    @objc private func testCFMotoPort() {
-        guard !running else { statusLabel.text = "请先停止 CarPlay"; return }
-        let target = (zeehoAddressField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !target.isEmpty else { statusLabel.text = "请填写仪表 IP"; return }
-        guard let local = localCarPlayAddress else { statusLabel.text = "请先连接仪表 Wi-Fi"; return }
-        cfmotoProbeButton.isEnabled = false
-        log("春风独立诊断：测试 \(target):10930；不使用 MFi 身份")
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result: String
-            do {
-                let socket = try TailingSocket.create()
-                defer { socket.close() }
-                try socket.connect(localIP: local, remoteIP: target, port: 10930)
-                result = "春风诊断：TCP 10930 连接成功（尚未验证 PXC 握手）"
-            } catch {
-                result = "春风诊断：TCP 10930 连接失败：\(error.localizedDescription)"
-            }
-            DispatchQueue.main.async { [weak self] in
-                self?.log(result)
-                self?.updateZeehoStatus(result)
-                self?.statusLabel.text = result
-                self?.cfmotoProbeButton.isEnabled = true
-            }
-        }
-    }
-
     @objc private func testSameDeviceTransport() {
         guard !running else {
             statusLabel.text = "请先停止 CarPlay，再测试本机传输。"
@@ -2224,7 +2194,7 @@ extension ReceiverViewController {
         page("画面") { [unowned self] in
             if outputMode == .zeeho || outputMode == .cfmoto {
                 return [
-                    SettingsSection(outputMode == .cfmoto ? "春风 150SC-F（诊断）" : "极核 6.2 寸", [.info("仪表画面", "1024×480 · H.264 · 25 FPS")]),
+                    SettingsSection(outputMode == .cfmoto ? "春风 150SC-F" : "极核 6.2 寸", [.info("仪表画面", outputMode == .cfmoto ? "1024×512 · H.264 · 25 FPS" : "1024×480 · H.264 · 25 FPS")]),
                     SettingsSection("图标", [.control("CarPlay 图标大小", icon: ("square.grid.2x2.fill", .systemPurple), iconSizeControl)])
                 ]
             }
@@ -2547,12 +2517,11 @@ extension ReceiverViewController {
             case .airPlay: return airPlayOutputSections()
             case .tailing: return tailingOutputSections()
             case .cfmoto:
-                return [SettingsSection("春风 150SC-F（实验诊断）", footer: "仅测试 PXC 协议是否兼容；MotoPlay 全屏镜像不代表此协议或 CarPlay 已适配。请连接 CFMOTO 仪表 Wi-Fi 后观察日志。", [
+                return [SettingsSection("春风 150SC-F", footer: "让 iPhone 加入春风仪表 Wi-Fi，选择对应的 Wi-Fi 预设，打开仪表投屏后启动 CarPlay。", [
                     .field("仪表 IP 地址", zeehoAddressField, placeholder: "192.168.0.1"),
                     .action("扫描仪表二维码", icon: ("qrcode.viewfinder", .systemBlue)) { [unowned self] in
                         self.scanCFMotoQRCode()
                     },
-                    .control("独立网络诊断", cfmotoProbeButton),
                     .note(zeehoStatus)
                 ])]
             case .zeeho:
@@ -2579,7 +2548,7 @@ extension ReceiverViewController {
     }
 
     private func prepareExternalOutput(configuration: ReceiverConfiguration) {
-        if configuration.zeehoAddress != nil { updateZeehoStatus(configuration.cfmotoDiagnostic ? "正在连接春风仪表（实验诊断）…" : "正在连接极核仪表…") }
+        if configuration.zeehoAddress != nil { updateZeehoStatus(configuration.cfmotoDiagnostic ? "正在连接春风仪表…" : "正在连接极核仪表…") }
         if configuration.ninebotAddress != nil { updateNinebotStatus("正在连接九号仪表…") }
         if configuration.tailingAddress != nil { updateTailingStatus("正在连接台铃仪表…") }
         if configuration.carLifeEnabled {
