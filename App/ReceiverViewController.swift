@@ -77,6 +77,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     /// The settings sheet while it is shown.
     private weak var settingsNavigation: UINavigationController?
     private let transportProbeButton = UIButton(type: .system)
+    private let cfmotoProbeButton = UIButton(type: .system)
     private let orientationControl = ChoiceMenu(items: ["横屏", "竖屏"])
     private let wifiPathMonitor = NWPathMonitor(requiredInterfaceType: .wifi)
     private var networkStartupTask: Task<Void, Never>?
@@ -510,6 +511,8 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         logView.backgroundColor = .secondarySystemBackground; logView.layer.cornerRadius = 12
         logView.heightAnchor.constraint(equalToConstant: 220).isActive = true
         transportProbeButton.addTarget(self, action: #selector(testSameDeviceTransport), for: .touchUpInside)
+        cfmotoProbeButton.setTitle("测试春风握手端口（无需 MFi）", for: .normal)
+        cfmotoProbeButton.addTarget(self, action: #selector(testCFMotoPort), for: .touchUpInside)
         stack.axis = .vertical; stack.spacing = 16; stack.translatesAutoresizingMaskIntoConstraints = false
         let scroll = UIScrollView(); scroll.translatesAutoresizingMaskIntoConstraints = false
         scroll.keyboardDismissMode = .interactive
@@ -1301,6 +1304,33 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         if modeControl.selectedSegmentIndex != 2 { UserDefaults.standard.set(config.name, forKey: "receiverName") }
         return true
     }
+    // A standalone network-only diagnostic. This does not claim to authenticate or start CarPlay.
+    @objc private func testCFMotoPort() {
+        guard !running else { statusLabel.text = "请先停止 CarPlay"; return }
+        let target = (zeehoAddressField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty else { statusLabel.text = "请填写仪表 IP"; return }
+        guard let local = localCarPlayAddress else { statusLabel.text = "请先连接仪表 Wi-Fi"; return }
+        cfmotoProbeButton.isEnabled = false
+        log("春风独立诊断：测试 \(target):10930；不使用 MFi 身份")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result: String
+            do {
+                let socket = try TailingSocket.create()
+                defer { socket.close() }
+                try socket.connect(localIP: local, remoteIP: target, port: 10930)
+                result = "春风诊断：TCP 10930 连接成功（尚未验证 PXC 握手）"
+            } catch {
+                result = "春风诊断：TCP 10930 连接失败：\(error.localizedDescription)"
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.log(result)
+                self?.updateZeehoStatus(result)
+                self?.statusLabel.text = result
+                self?.cfmotoProbeButton.isEnabled = true
+            }
+        }
+    }
+
     @objc private func testSameDeviceTransport() {
         guard !running else {
             statusLabel.text = "请先停止 CarPlay，再测试本机传输。"
@@ -2518,6 +2548,7 @@ extension ReceiverViewController {
             case .cfmoto:
                 return [SettingsSection("春风 150SC-F（实验诊断）", footer: "仅测试 PXC 协议是否兼容；MotoPlay 全屏镜像不代表此协议或 CarPlay 已适配。请连接 CFMOTO 仪表 Wi-Fi 后观察日志。", [
                     .field("仪表 IP 地址", zeehoAddressField, placeholder: "192.168.0.1"),
+                    .control("独立网络诊断", cfmotoProbeButton),
                     .note(zeehoStatus)
                 ])]
             case .zeeho:
