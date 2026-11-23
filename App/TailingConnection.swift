@@ -498,8 +498,9 @@ final class TailingConnection: @unchecked Sendable {
             let response: UInt16
             switch request.command {
             case 0x10:
-                guard request.payload.count >= 32 else {
-                    throw TailingError.protocolFailure("媒体配置载荷不足 32 字节")
+                let minConfigLength = profile.isCFMotoDiagnostic ? 12 : 32
+                guard request.payload.count >= minConfigLength else {
+                    throw TailingError.protocolFailure("媒体配置载荷不足 \(minConfigLength) 字节")
                 }
                 let width = request.payload.uint16LE(0)
                 let height = request.payload.uint16LE(2)
@@ -507,29 +508,47 @@ final class TailingConnection: @unchecked Sendable {
                     log("春风媒体配置请求：报告尺寸 \(width)×\(height)；视频编码保持 \(profile.width)×\(profile.height)")
                 }
                 let validDimensions = profile.isCFMotoDiagnostic
-                    ? width == 1024 && (height == 480 || height == 488 || height == 515)
+                    ? (320...1920).contains(Int(width)) && (240...1080).contains(Int(height))
                     : (isZeeho ? width == 1024 && (height == 480 || height == 488)
                        : width == 480 && height == 272)
                 guard validDimensions else {
                     throw TailingError.protocolFailure("仪表媒体尺寸 \(width)×\(height) 与 \(dashboard) 配置不符")
                 }
-                let deadline = Date().addingTimeInterval(5)
-                condition.lock()
-                while signedHUID == nil && !closed {
-                    if !condition.wait(until: deadline) { break }
+                if profile.isCFMotoDiagnostic {
+                    // Standard EasyConn MediaProject capture configuration needs
+                    // only the dimensions, fps and requested codec. The original
+                    // Zeeho identity-echo extension is not present on every bike.
+                    let requestedEncoder = request.payload.uint32LE(8)
+                    if request.payload.count > 32,
+                       let signature = signedHUID,
+                       let echoed = Data(base64Encoded: request.payload.dropFirst(32),
+                                         options: .ignoreUnknownCharacters) {
+                        log(echoed == signature ? "春风媒体身份回显匹配" : "春风媒体配置携带非匹配扩展，继续兼容协商")
+                    }
+                    payload.appendLE(UInt32(2)) // H.264
+                    payload.appendLE(UInt16(profile.width))
+                    payload.appendLE(UInt16(profile.height))
+                    payload.append(request.payload.count > 29 ? request.payload[29] : UInt8(0))
+                    log("春风媒体配置：请求编码器=\(requestedEncoder)，回报 H.264 / \(profile.width)×\(profile.height)，扩展位=\(payload[8])")
+                } else {
+                    let deadline = Date().addingTimeInterval(5)
+                    condition.lock()
+                    while signedHUID == nil && !closed {
+                        if !condition.wait(until: deadline) { break }
+                    }
+                    let signature = signedHUID, huid = self.huid, identity = self.identity
+                    condition.unlock()
+                    guard let signature, let huid, let identity,
+                          let echoed = Data(base64Encoded: request.payload.dropFirst(32), options: .ignoreUnknownCharacters),
+                          echoed == signature else { throw TailingError.protocolFailure("媒体身份回显不匹配") }
+                    try identity.verify(echoed, huid: huid)
+                    payload.appendLE(UInt32(isZeeho ? 2 : 1))
+                    payload.appendLE(UInt16(profile.width))
+                    payload.appendLE(UInt16(profile.height))
+                    log("媒体身份回显校验通过，仪表报告 \(width)×\(height)，回应 \(isZeeho ? "H.264" : "JPEG") / \(profile.width)×\(profile.height)")
                 }
-                let signature = signedHUID, huid = self.huid, identity = self.identity
-                condition.unlock()
-                guard let signature, let huid, let identity,
-                      let echoed = Data(base64Encoded: request.payload.dropFirst(32), options: .ignoreUnknownCharacters),
-                      echoed == signature else { throw TailingError.protocolFailure("媒体身份回显不匹配") }
-                try identity.verify(echoed, huid: huid)
-                payload.appendLE(UInt32(isZeeho ? 2 : 1))
-                payload.appendLE(UInt16(profile.width))
-                payload.appendLE(UInt16(profile.height))
                 response = 0x11
-                condition.lock(); configured = true; condition.unlock()
-                log("媒体身份回显校验通过，仪表报告 \(width)×\(height)，回应 \(isZeeho ? "H.264" : "JPEG") / \(profile.width)×\(profile.height)")
+                condition.lock(); configured = true; condition.broadcast(); condition.unlock()
             case 0x70:
                 condition.lock(); let ready = configured; condition.unlock()
                 guard ready else { throw TailingError.protocolFailure("仪表在配置完成前请求媒体启动") }
