@@ -25,6 +25,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>CarWithin 仅在你选择时使用相机扫描春风仪表的二维码，以读取仪表网络连接信息。</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>CarWithin 需要使用蓝牙来发现并连接 CarPlay 设备。</string>
 	<key>NSBonjourServices</key>
