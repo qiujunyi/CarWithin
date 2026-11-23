@@ -238,7 +238,7 @@ final class TailingConnection: @unchecked Sendable {
 
     /// Call with condition locked. Never includes HUID, certificates, tokens or QR credentials.
     private func diagnosticStateLocked() -> String {
-        "身份=\(signedHUID == nil ? "未回应" : "已回应")；控制=\(controlConnected ? "已连接" : "未连接")；媒体控制=\(auxiliaryConnected ? "已连接" : "未连接")；媒体配置=\(configured ? "完成" : "未完成")；媒体启动=\(mediaStarted ? "完成" : "未完成")；视频=\(video == nil ? "未连接" : "已连接")；镜像控制=\(reverseControl == nil ? "未就绪" : "已发送")"
+        "身份=\(signedHUID == nil ? "未回应" : "已回应")；控制=\(controlConnected ? "已连接" : "未连接")；媒体控制=\(auxiliaryConnected ? "已连接" : "未连接")；媒体配置=\(configured ? "完成" : "未完成")；媒体启动=\(mediaStarted ? "完成" : "未完成")；视频=\(video == nil ? "未连接" : "已连接")；媒体端口=\(ports.auxiliary)/\(ports.video)；镜像控制=\(profile.isCFMotoDiagnostic ? "仪表自主启动" : (reverseControl == nil ? "未就绪" : "已发送"))"
     }
 
     private func accept(_ server: TailingSocket, port: UInt16) {
@@ -370,6 +370,36 @@ final class TailingConnection: @unchecked Sendable {
                 self.huid = huid; signedHUID = signature; condition.broadcast()
                 condition.unlock()
                 log("仪表报告 HUName=\(name.debugDescription)，已回应本机 PXC RSA\(profile.isCFMotoDiagnostic ? 1024 : 2048) 身份")
+                continue
+            case 0x10600 where profile.isCFMotoDiagnostic:
+                // CFDL16 EasyConn HU_TIME_SYNC is a binary body with a
+                // 29-byte yyyy-MM-dd HH:mm:ss.SSS000000 timestamp at offset 16.
+                // Echo a valid dash clock, never send an empty ACK that resets
+                // some dashboards to 1970. See MotoLink control.ts.
+                var timeBody = request.payload
+                let stampLength = 29
+                let stampOffset = 16
+                var invalidClock = timeBody.count < stampOffset + stampLength
+                if !invalidClock {
+                    let bytes = Data(timeBody[stampOffset..<(stampOffset + stampLength)])
+                    let stamp = String(decoding: bytes, as: UTF8.self)
+                    let year = Int(stamp.prefix(4)) ?? 0
+                    invalidClock = year < 2000 || stamp.count != stampLength ||
+                        !stamp.contains("-") || !stamp.contains(":")
+                }
+                if invalidClock {
+                    if timeBody.count < stampOffset + stampLength {
+                        timeBody.append(Data(repeating: 0, count: stampOffset + stampLength - timeBody.count))
+                    }
+                    let formatter = DateFormatter()
+                    formatter.locale = Locale(identifier: "en_US_POSIX")
+                    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+                    let corrected = formatter.string(from: Date()) + "000000"
+                    timeBody.replaceSubrange(stampOffset..<(stampOffset + stampLength),
+                                             with: corrected.utf8)
+                }
+                try replyControl(socket, request, payload: timeBody)
+                log("春风 PXC 已回应 0x10600 时间同步（\\(invalidClock ? "修正仪表时间" : "回显仪表时间")）")
                 continue
             case 0x10450:
                 let time = Int64(Date().timeIntervalSince1970 * 1_000)
