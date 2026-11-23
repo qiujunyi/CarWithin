@@ -55,6 +55,38 @@ enum TailingProtocol {
         return Auxiliary(command: head.uint16LE(0), token: head.uint32LE(4), payload: payload)
     }
 
+    /// 16-byte EasyConn session-init packet on 10930, distinct from PXC
+    /// control framing. CFDL16 advertises service package com.lxt.cfmoto.
+    static func easyConnInit(phoneType: String, packageName: String) throws -> Data {
+        let body = try json(["phoneType": phoneType, "packageName": packageName])
+        let size = body.count + 16
+        guard size <= 4096 else { throw TailingError.protocolFailure("EasyConn 初始化包过长") }
+        var header = Data(repeating: 0, count: 16)
+        header[0] = 0x10
+        header[3] = 0x70
+        header[4] = UInt8(size & 0xff)
+        header[5] = UInt8((size >> 8) & 0xff)
+        let magic = size ^ 16
+        header[8] = UInt8(magic & 0xff)
+        header[9] = UInt8((magic >> 8) & 0xff)
+        header[11] = 0x70
+        return header + body
+    }
+
+    /// CFMOTO's indexed video transport: 4-byte little-endian length
+    /// (including index), 4-byte little-endian frame index, then Annex-B AU.
+    static func h264Indexed(_ accessUnit: Data, frameIndex: UInt32) throws -> Data {
+        guard accessUnit.count > 4, accessUnit.count <= 8 * 1_024 * 1_024,
+              accessUnit.starts(with: [0, 0, 0, 1]) else {
+            throw TailingError.protocolFailure("春风 H.264 Annex-B 帧无效")
+        }
+        var data = Data()
+        data.appendLE(UInt32(accessUnit.count + 4))
+        data.appendLE(frameIndex)
+        data.append(accessUnit)
+        return data
+    }
+
     static func jpeg(_ jpeg: Data) throws -> Data {
         guard jpeg.count >= 4, jpeg.count <= 8 * 1_024 * 1_024,
               jpeg.starts(with: [0xff, 0xd8]), jpeg.suffix(2) == Data([0xff, 0xd9]) else {
