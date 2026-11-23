@@ -1,6 +1,7 @@
 import UIKit
 import SwiftUI
 import AVKit
+import AVFoundation
 import Network
 import NetworkExtension
 import CoreLocation
@@ -2548,6 +2549,9 @@ extension ReceiverViewController {
             case .cfmoto:
                 return [SettingsSection("春风 150SC-F（实验诊断）", footer: "仅测试 PXC 协议是否兼容；MotoPlay 全屏镜像不代表此协议或 CarPlay 已适配。请连接 CFMOTO 仪表 Wi-Fi 后观察日志。", [
                     .field("仪表 IP 地址", zeehoAddressField, placeholder: "192.168.0.1"),
+                    .action("扫描仪表二维码", icon: ("qrcode.viewfinder", .systemBlue)) { [unowned self] in
+                        self.scanCFMotoQRCode()
+                    },
                     .control("独立网络诊断", cfmotoProbeButton),
                     .note(zeehoStatus)
                 ])]
@@ -2889,6 +2893,175 @@ extension ReceiverViewController {
         return card
     }
 
+}
+
+
+// MARK: - CFMOTO QR: discovery only. PXC session negotiation remains independent.
+
+private struct CFMotoQRDetails {
+    let ssid: String?
+    let password: String?
+    let modelID: String?
+    let action: String?
+    let authentication: String?
+
+    static func parse(_ raw: String) -> Self? {
+        guard let components = URLComponents(string: raw),
+              let host = components.host?.lowercased(),
+              host == "c.cfmoto.com" || host.hasSuffix(".cfmoto.com"),
+              let entries = components.queryItems, !entries.isEmpty else { return nil }
+        let fields = Dictionary(entries.compactMap { pair -> (String, String)? in
+            guard let value = pair.value, !value.isEmpty else { return nil }
+            let key = pair.name.lowercased().replacingOccurrences(of: "_", with: "")
+            return (key, value)
+        }, uniquingKeysWith: { previous, _ in previous })
+        func pick(_ names: [String]) -> String? {
+            names.compactMap { fields[$0] }.first
+        }
+        return Self(ssid: pick(["ssid", "wifissid", "wifiname"]),
+                    password: pick(["pwd", "password", "passwd", "wifipwd", "wifipassword", "wifipass", "pass"]),
+                    modelID: pick(["modelid"]), action: pick(["action"]),
+                    authentication: pick(["auth", "wifiauth"]))
+    }
+}
+
+private final class CFMotoQRScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+    var onScanned: ((String) -> Void)?
+    private let session = AVCaptureSession()
+    private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var hasResult = false
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        let closeButton = UIButton(type: .system)
+        closeButton.setTitle("取消", for: .normal)
+        closeButton.tintColor = .white
+        closeButton.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        closeButton.layer.cornerRadius = 10
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.addTarget(self, action: #selector(cancel), for: .touchUpInside)
+        view.addSubview(closeButton)
+        let hint = UILabel()
+        hint.text = "请将春风仪表的二维码放在取景框中"
+        hint.textColor = .white
+        hint.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        hint.textAlignment = .center
+        hint.numberOfLines = 0
+        hint.layer.cornerRadius = 10
+        hint.clipsToBounds = true
+        hint.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(hint)
+        NSLayoutConstraint.activate([
+            closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16),
+            closeButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            closeButton.widthAnchor.constraint(equalToConstant: 76),
+            closeButton.heightAnchor.constraint(equalToConstant: 42),
+            hint.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 18),
+            hint.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -18),
+            hint.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -32),
+            hint.heightAnchor.constraint(greaterThanOrEqualToConstant: 52)
+        ])
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized: configureCamera()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                DispatchQueue.main.async { [weak self] in
+                    if granted { self?.configureCamera() }
+                    else { self?.showCameraError("未取得相机权限，请到系统设置开启后重试。") }
+                }
+            }
+        default: showCameraError("请在 iPhone 设置中允许 CarWithin 使用相机。")
+        }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        previewLayer?.frame = view.bounds
+    }
+
+    private func configureCamera() {
+        guard let device = AVCaptureDevice.default(for: .video),
+              let input = try? AVCaptureDeviceInput(device: device),
+              session.canAddInput(input) else {
+            showCameraError("无法打开摄像头。")
+            return
+        }
+        session.addInput(input)
+        let metadata = AVCaptureMetadataOutput()
+        guard session.canAddOutput(metadata) else {
+            showCameraError("设备不支持二维码扫描。")
+            return
+        }
+        session.addOutput(metadata)
+        metadata.setMetadataObjectsDelegate(self, queue: .main)
+        metadata.metadataObjectTypes = [.qr]
+        let preview = AVCaptureVideoPreviewLayer(session: session)
+        preview.videoGravity = .resizeAspectFill
+        view.layer.insertSublayer(preview, at: 0)
+        preview.frame = view.bounds
+        previewLayer = preview
+        DispatchQueue.global(qos: .userInitiated).async { [session] in session.startRunning() }
+    }
+
+    private func showCameraError(_ message: String) {
+        let alert = UIAlertController(title: "二维码扫描不可用", message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "返回", style: .default) { [weak self] _ in
+            self?.dismiss(animated: true)
+        })
+        present(alert, animated: true)
+    }
+
+    func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput objects: [AVMetadataObject],
+                        from connection: AVCaptureConnection) {
+        guard !hasResult,
+              let value = (objects.first { ($0 as? AVMetadataMachineReadableCodeObject)?.type == .qr }
+                           as? AVMetadataMachineReadableCodeObject)?.stringValue else { return }
+        hasResult = true
+        dismiss(animated: true) { [weak self] in self?.onScanned?(value) }
+    }
+
+    @objc private func cancel() { dismiss(animated: true) }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        DispatchQueue.global(qos: .userInitiated).async { [session] in
+            if session.isRunning { session.stopRunning() }
+        }
+    }
+}
+
+extension ReceiverViewController {
+    private func scanCFMotoQRCode() {
+        guard !running else { alert("请先停止 CarPlay", "停止 CarPlay 后再扫描仪表二维码。"); return }
+        let scanner = CFMotoQRScannerViewController()
+        scanner.modalPresentationStyle = .fullScreen
+        scanner.onScanned = { [weak self] raw in self?.processCFMotoQRCode(raw) }
+        (settingsNavigation ?? self).present(scanner, animated: true)
+    }
+
+    private func processCFMotoQRCode(_ raw: String) {
+        guard let result = CFMotoQRDetails.parse(raw) else {
+            alert("无法识别春风二维码", "二维码不是预期的 CFMOTO 设备链接。请使用仪表上的手机互联二维码。")
+            return
+        }
+        var details = "二维码属于 CFMOTO 设备连接信息。"
+        if let model = result.modelID { details += "\n车型标识：\(model)" }
+        if let action = result.action { details += "\n操作标识：\(action)" }
+        if let ssid = result.ssid { details += "\n仪表 Wi-Fi：\(ssid)" }
+        if let auth = result.authentication { details += "\n认证方式：\(auth)" }
+        details += result.password == nil ? "\n二维码未识别到密码字段。" : "\n已识别 Wi-Fi 密码（内容已隐藏）。"
+        details += "\n\n请先在系统设置中加入仪表 Wi-Fi，再回到 CarWithin 启动。扫码本身不会触发未知的 PXC 配对命令。"
+        log("春风二维码：已解析车型及网络参数，敏感字段未写入日志")
+        let sheet = UIAlertController(title: "春风仪表二维码已识别", message: details, preferredStyle: .alert)
+        if let password = result.password {
+            sheet.addAction(UIAlertAction(title: "复制 Wi-Fi 密码", style: .default) { _ in
+                UIPasteboard.general.string = password
+            })
+        }
+        sheet.addAction(UIAlertAction(title: "完成", style: .cancel))
+        (settingsNavigation ?? self).present(sheet, animated: true)
+    }
 }
 
 extension ReceiverViewController: UIDocumentPickerDelegate {
