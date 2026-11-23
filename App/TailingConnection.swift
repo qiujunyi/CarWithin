@@ -7,7 +7,7 @@ struct TailingDisplayProfile {
     static let tailing43 = TailingDisplayProfile(width: 480, height: 272, isZeeho: false, isCFMotoDiagnostic: false)
     static let zeeho62 = TailingDisplayProfile(width: 1024, height: 480, isZeeho: true, isCFMotoDiagnostic: false)
     // Experimental PXC diagnostic profile. Not evidence of CFMOTO protocol compatibility.
-    static let cfmoto150scf = TailingDisplayProfile(width: 1024, height: 480, isZeeho: true, isCFMotoDiagnostic: true)
+    static let cfmoto150scf = TailingDisplayProfile(width: 1024, height: 512, isZeeho: true, isCFMotoDiagnostic: true)
 }
 
 import Foundation
@@ -76,7 +76,7 @@ final class TailingConnection: @unchecked Sendable {
 
     func start() throws {
         if profile.isCFMotoDiagnostic {
-            log("春风诊断模式：实验性 PXC 协商；编码尺寸 1024×480，仪表媒体尺寸将单独记录")
+            log("春风诊断模式：实验性 PXC 协商；编码尺寸 1024×512（仪表请求画面 1024×515）")
         }
         // EasyConn legacy CFMOTO is independently authenticated by the bike
         // using a session-local RSA-1024 key. MFi/iAP2 authentication is separate
