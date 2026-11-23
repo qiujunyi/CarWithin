@@ -48,6 +48,9 @@ final class ZeehoOutput {
         private var encoded: Result<H264EncodedFrame, Error>?
 
         private let connection: TailingConnection
+        private let cfmotoDiagnostic: Bool
+        private var videoWidth: Int { ZeehoOutput.width }
+        private var videoHeight: Int { cfmotoDiagnostic ? 512 : ZeehoOutput.height }
         private var decoder: TailingH264Decoder?
         private var encoder: H264Encoder?
         private var parameters = VideoParameterSets(codec: .h264)
@@ -68,6 +71,7 @@ final class ZeehoOutput {
         init(queue: DispatchQueue, localAddress: String, targetAddress: String, phone: TailingPhoneInfo, cfmotoDiagnostic: Bool, onState: @escaping (String) -> Void, onLog: @escaping (String) -> Void,
              requestKeyframe: @escaping () -> Void) {
             self.queue = queue
+            self.cfmotoDiagnostic = cfmotoDiagnostic
             self.connection = TailingConnection(localIP: localAddress, targetIP: targetAddress,
                 profile: cfmotoDiagnostic ? .cfmoto150scf : .zeeho62, phone: phone,
                 ports: cfmotoDiagnostic
@@ -114,12 +118,12 @@ final class ZeehoOutput {
                             guard let recovered else { throw TailingError.timeout("等待 H.264 编码画面") }
                             try connection.sendH264(recovered.data)
                             first = false
-                            report("正在投屏 · 1024×480 · H.264")
+                            report("正在投屏 · 1024×\\(videoHeight) · H.264")
                             continue
                         }
                         try connection.sendH264(result.data)
                         first = false
-                        report("正在投屏 · 1024×480 · H.264")
+                        report("正在投屏 · 1024×\\(videoHeight) · H.264")
                     }
                 } catch {
                     if active {
@@ -208,7 +212,7 @@ final class ZeehoOutput {
             do {
                 if encoder == nil {
                     guard now - lastCodecFailure >= 0.5 else { return nil }
-                    encoder = try H264Encoder(width: ZeehoOutput.width, height: ZeehoOutput.height,
+                    encoder = try H264Encoder(width: videoWidth, height: videoHeight,
                                               fps: ZeehoOutput.fps, bitrate: 2_500_000) { [weak self] result in
                         guard let self else { return }
                         self.lock.withLock { self.encoded = result }
@@ -239,7 +243,7 @@ final class ZeehoOutput {
         }
 
         private func fittedImage(_ image: CVPixelBuffer) throws -> CVPixelBuffer {
-            let width = ZeehoOutput.width, height = ZeehoOutput.height
+            let width = videoWidth, height = videoHeight
             if CVPixelBufferGetWidth(image) == width, CVPixelBufferGetHeight(image) == height { return image }
             var buffer: CVPixelBuffer?
             let status = CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA,
