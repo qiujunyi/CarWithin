@@ -77,8 +77,16 @@ final class TailingConnection: @unchecked Sendable {
         if profile.isCFMotoDiagnostic {
             log("春风诊断模式：实验性 PXC 协商；编码尺寸 1024×480，仪表媒体尺寸将单独记录")
         }
-        let loaded = try identityProvider()
+        // EasyConn legacy CFMOTO is independently authenticated by the bike
+        // using a session-local RSA-1024 key. MFi/iAP2 authentication is separate
+        // and is never touched by the PXC compatibility profile.
+        let loaded = profile.isCFMotoDiagnostic
+            ? try TailingIdentity.generate(keySizeInBits: 1024)
+            : try identityProvider()
         condition.lock(); identity = loaded; condition.unlock()
+        if profile.isCFMotoDiagnostic {
+            log("春风旧版 EasyConn 兼容身份：PXC RSA-1024（会话临时密钥），supportFunction=0")
+        }
         // 先全部监听，再请求仪表反向连接；不使用所有网卡的通配地址。
         var listeners: [(UInt16, TailingSocket)] = []
         for port in [ports.control, ports.auxiliary, ports.video] {
@@ -93,8 +101,12 @@ final class TailingConnection: @unchecked Sendable {
         let announcement = try tracked(TailingSocket.create())
         defer { announcement.close() }
         try announcement.connect(localIP: localIP, remoteIP: targetIP, port: ports.announcement)
+        // The known legacy modelId 37416 implementation advertises the Android
+        // EasyConn transport profile. This affects PXC only, not iOS CarPlay.
+        let pxcType = profile.isCFMotoDiagnostic ? "Android" : "iOS"
+        let pxcPackage = profile.isCFMotoDiagnostic ? "com.cfmoto.cfmotointernational" : phone.package
         try announcement.write(TailingProtocol.control(0x70000010, payload: TailingProtocol.json([
-            "phoneType": "iOS", "packageName": phone.package
+            "phoneType": pxcType, "packageName": pxcPackage
         ])))
         if profile.isCFMotoDiagnostic {
             log(String(format: "PXC TX %d: cmd=0x70000010（不记录请求载荷）", Int(ports.announcement)))
@@ -106,7 +118,7 @@ final class TailingConnection: @unchecked Sendable {
         }
         guard reply.command == 0x70000011,
               try TailingProtocol.object(reply.payload)["status"] as? Bool == true else {
-            throw TailingError.protocolFailure("仪表未接受 iOS 投屏请求")
+            throw TailingError.protocolFailure("仪表未接受 PXC 投屏请求")
         }
         let deadline = Date().addingTimeInterval(20)
         condition.lock()
@@ -320,20 +332,38 @@ final class TailingConnection: @unchecked Sendable {
                     log("春风仪表协议能力：sdkVersion=\(field("sdkVersion"))，pxcVersion=\(field("pxcVersion"))，mirrorMode=\(field("mirrorMode"))，productType=\(field("productType"))，screenType=\(field("screenType"))，supportScreenMirroring=\(field("supportScreenMirroring"))，enableSockServerAuth=\(field("enableSockServerAuth"))")
                 }
                 let signature = try identity.sign(huid)
-                payload = try TailingProtocol.json([
-                    "pxcVersion": "1.0.2", "phoneUUID": identity.phoneID,
-                    "phoneBrand": "iPhone", "phoneModel": phone.model,
-                    "phoneOsVersion": phone.systemVersion, "phoneOs": "iOS",
-                    "package": phone.package, "versionCode": phone.versionCode, "token": 0,
-                    "pubkey": try identity.publicKey().base64EncodedString(),
-                    "encryptedHUID": signature.base64EncodedString(), "bluetoothName": "",
-                    "supportH264IFrame": isZeeho, "supportFunction": 128, "mirrorRequestReconnect": true
-                ])
+                if profile.isCFMotoDiagnostic {
+                    // Compare with the documented legacy CFDL16 / modelId 37416
+                    // EasyConn client-info profile. Do not send the Zeeho-only
+                    // mirrorRequestReconnect field or advertise unsupported flags.
+                    payload = try TailingProtocol.json([
+                        "pxcVersion": "1.0.2", "phoneUUID": identity.phoneID,
+                        "phoneBrand": "Apple", "phoneModel": "iPhone",
+                        "phoneOsVersion": "35", "phoneOs": "Android",
+                        "package": "com.cfmoto.cfmotointernational",
+                        "versionCode": 126, "token": 0,
+                        "pubkey": try identity.publicKey().base64EncodedString(),
+                        "encryptedHUID": signature.base64EncodedString(),
+                        "bluetoothName": "CarWithin", "supportH264IFrame": true,
+                        "supportFunction": 0, "supportSyncCorrectTime": false,
+                        "appVersionFingerPrint": "carwithin-cfmoto-test"
+                    ])
+                } else {
+                    payload = try TailingProtocol.json([
+                        "pxcVersion": "1.0.2", "phoneUUID": identity.phoneID,
+                        "phoneBrand": "iPhone", "phoneModel": phone.model,
+                        "phoneOsVersion": phone.systemVersion, "phoneOs": "iOS",
+                        "package": phone.package, "versionCode": phone.versionCode, "token": 0,
+                        "pubkey": try identity.publicKey().base64EncodedString(),
+                        "encryptedHUID": signature.base64EncodedString(), "bluetoothName": "",
+                        "supportH264IFrame": isZeeho, "supportFunction": 128, "mirrorRequestReconnect": true
+                    ])
+                }
                 try replyControl(socket, request, payload: payload)
                 condition.lock()
                 self.huid = huid; signedHUID = signature; condition.broadcast()
                 condition.unlock()
-                log("仪表报告 HUName=\(name.debugDescription)，已回应本机 RSA2048 身份")
+                log("仪表报告 HUName=\(name.debugDescription)，已回应本机 PXC RSA\(profile.isCFMotoDiagnostic ? 1024 : 2048) 身份")
                 continue
             case 0x10450:
                 let time = Int64(Date().timeIntervalSince1970 * 1_000)
