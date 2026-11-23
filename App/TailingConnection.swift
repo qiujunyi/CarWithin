@@ -111,7 +111,7 @@ final class TailingConnection: @unchecked Sendable {
         let deadline = Date().addingTimeInterval(20)
         condition.lock()
         defer { condition.unlock() }
-        while !closed && failure == nil && (signedHUID == nil || video == nil || !mediaStarted || (isZeeho && reverseControl == nil)) {
+        while !closed && failure == nil && (signedHUID == nil || video == nil || !mediaStarted || (isZeeho && !profile.isCFMotoDiagnostic && reverseControl == nil)) {
             if !condition.wait(until: deadline) {
                 let state = profile.isCFMotoDiagnostic ? "；" + diagnosticStateLocked() : ""
                 throw TailingError.timeout("媒体会话未就绪" + state + "，请退出官方投屏并重新开启仪表投屏")
@@ -141,7 +141,7 @@ final class TailingConnection: @unchecked Sendable {
     // 视频请求与发送由同一个会话任务顺序执行。
     func sendH264(_ accessUnit: Data) throws {
         let socket = try videoSocket()
-        let packet = try TailingProtocol.h264(accessUnit, includePrefix: !sentH264Prefix)
+        let packet = try TailingProtocol.h264(accessUnit, includePrefix: !sentH264Prefix && !profile.isCFMotoDiagnostic)
         do {
             try socket.write(packet)
             sentH264Prefix = true
@@ -261,6 +261,7 @@ final class TailingConnection: @unchecked Sendable {
 
     private func control(_ socket: TailingSocket) throws {
         var reverseStarted = false
+        var heartbeatStarted = false
         var reportedUnsupported = false
         while true {
             // 连接在两条完整消息之间可以静默，收到半条消息后仍限制读取时间。
@@ -280,6 +281,19 @@ final class TailingConnection: @unchecked Sendable {
             case 0x10690 where isZeeho, 0x10780 where isZeeho:
                 // 极核上报 FTP 速率和运行日志，投屏会话只确认收到。
                 break
+            case 0x103e0 where profile.isCFMotoDiagnostic:
+                // CFMOTO CHECK_SN: acknowledging the request is not enough. The bike
+                // expects a separate CHECK_SN_RESULT before it may open 10921/10920.
+                // Don't log the serial number or client-set token.
+                let requestInfo = (try? TailingProtocol.object(request.payload)) ?? [:]
+                let serial = requestInfo["sn"] as? String ?? ""
+                let clientSet = requestInfo["client_set"] as? String ?? "easy_conn"
+                try replyControl(socket, request, payload: Data())
+                try sendControl(socket, command: 0x201c0, identifier: 0,
+                                object: ["isOk": true, "errCode": 0, "errMsg": "",
+                                         "id": serial, "client_set": clientSet])
+                log("春风 PXC 已确认 CHECK_SN 并发送 0x201c0 结果（序列号不写入日志）")
+                continue
             case 0x103e0 where isZeeho:
                 // 0x103e1 是收件确认。序列号校验结果使用独立命令。
                 log("极核收到序列号校验请求，等待仪表继续媒体协商")
@@ -327,21 +341,48 @@ final class TailingConnection: @unchecked Sendable {
                     log(String(format: "仪表报告不支持控制消息（id=%u）；继续等待媒体协商", request.identifier))
                 }
                 continue
-            case 0x20021, 0x20031, 0x204c1, 0x20491, 0x20051, 0x20591, 0x205a1, 0x70000001:
+            case 0x20021, 0x20031, 0x204c1, 0x20491, 0x20051, 0x20591, 0x205a1, 0x201c1, 0x70000001:
                 continue // 回应不再回应，避免往返循环。
             default:
+                if profile.isCFMotoDiagnostic {
+                    if request.command & 1 == 0 {
+                        // Known MotoPlay variants send notifications that must receive
+                        // cmd+1 ACK before media sockets are established. Keep this
+                        // fallback only in the experimental CFMOTO profile.
+                        log(String(format: "春风未知 PXC 请求 0x%08x：发送空 ACK", request.command))
+                        try replyControl(socket, request, payload: Data())
+                    } else {
+                        log(String(format: "春风未知 PXC 回应 0x%08x：不重复 ACK", request.command))
+                    }
+                    continue
+                }
                 throw TailingError.protocolFailure(String(format: "未支持的协商命令 0x%08x", request.command))
             }
             try replyControl(socket, request, payload: payload)
+            if profile.isCFMotoDiagnostic && !heartbeatStarted &&
+                (request.command == 0x10000 || request.command == 0x20000) {
+                // Some MotoPlay HUs require heartbeat on both independent
+                // CAR_CTRL and CAR_DATA sockets, not only the second socket.
+                heartbeatStarted = true
+                startHeartbeat(socket)
+                log("春风 PXC 已开始通道保活，等待仪表后续协商")
+            }
             if request.command == 0x20000 && !reverseStarted {
                 reverseStarted = true
-                try sendControl(socket, command: 0x204c0, identifier: 1, object: ["state": 0, "msg": ""])
-                try sendControl(socket, command: 0x20020, identifier: 2, object: phone.display(mode: 2))
-                try sendControl(socket, command: 0x20030, identifier: 3, object: phone.display(mode: 1))
-                try socket.write(TailingProtocol.control(0x20050, identifier: 4))
-                try sendControl(socket, command: 0x205a0, identifier: 5, object: ["isMaskVisible": false])
-                if isZeeho { try startZeehoMirror(socket) }
-                startHeartbeat(socket)
+                if profile.isCFMotoDiagnostic {
+                    // MotoPlay implementations do not require the Zeeho-specific
+                    // 0x205a0/0x20590 commands (rejected by this 150SC-F firmware).
+                    // Let the dashboard initiate 10921/10920 on its own.
+                    log("春风 PXC CAR_DATA 已确认：不发送不支持的极核指令，等待媒体端口回连")
+                } else {
+                    try sendControl(socket, command: 0x204c0, identifier: 1, object: ["state": 0, "msg": ""])
+                    try sendControl(socket, command: 0x20020, identifier: 2, object: phone.display(mode: 2))
+                    try sendControl(socket, command: 0x20030, identifier: 3, object: phone.display(mode: 1))
+                    try socket.write(TailingProtocol.control(0x20050, identifier: 4))
+                    try sendControl(socket, command: 0x205a0, identifier: 5, object: ["isMaskVisible": false])
+                    if isZeeho { try startZeehoMirror(socket) }
+                    startHeartbeat(socket)
+                }
             }
         }
     }
@@ -462,7 +503,11 @@ final class TailingConnection: @unchecked Sendable {
             case 0x30:
                 response = 0x31; payload.appendLE(UInt32(5002)); payload.appendLE(UInt32(1))
             case 0x60:
-                response = 0x61; payload = try TailingProtocol.json(["supportFunction": 0])
+                response = 0x61
+                payload = try TailingProtocol.json(profile.isCFMotoDiagnostic ? ["state": 0] : ["supportFunction": 0])
+            case 0x80 where profile.isCFMotoDiagnostic:
+                // Some MotoPlay firmwares request START_H264 separately.
+                response = 0x81
             case 0x20: continue // 不执行反控触摸。
             default:
                 response = 0x7f02
