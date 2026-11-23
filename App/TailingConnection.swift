@@ -399,7 +399,7 @@ final class TailingConnection: @unchecked Sendable {
                                              with: corrected.utf8)
                 }
                 try replyControl(socket, request, payload: timeBody)
-                log("春风 PXC 已回应 0x10600 时间同步（\\(invalidClock ? "修正仪表时间" : "回显仪表时间")）")
+                log("春风 PXC 已回应 0x10600 时间同步（\(invalidClock ? "修正仪表时间" : "回显仪表时间")）")
                 continue
             case 0x10450:
                 let time = Int64(Date().timeIntervalSince1970 * 1_000)
