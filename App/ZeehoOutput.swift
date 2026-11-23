@@ -69,7 +69,11 @@ final class ZeehoOutput {
              requestKeyframe: @escaping () -> Void) {
             self.queue = queue
             self.connection = TailingConnection(localIP: localAddress, targetIP: targetAddress,
-                profile: cfmotoDiagnostic ? .cfmoto150scf : .zeeho62, phone: phone, log: onLog)
+                profile: cfmotoDiagnostic ? .cfmoto150scf : .zeeho62, phone: phone,
+                ports: cfmotoDiagnostic
+                    ? TailingPorts(control: 10922, auxiliary: 10921, video: 10920, announcement: 10930)
+                    : .ios,
+                log: onLog)
             self.onState = onState
             self.onLog = onLog
             self.requestKeyframe = requestKeyframe
