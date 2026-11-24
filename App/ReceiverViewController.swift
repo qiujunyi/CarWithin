@@ -124,6 +124,8 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     private var httpsExpanded: Bool { UserDefaults.standard.bool(forKey: httpsExpandedKey) }
     private let browserCard = UIStackView()
     private let zeehoCard = UIStackView()
+    private var zeehoCardTitle: UILabel?
+    private var zeehoCardInstructions: UILabel?
     private let zeehoCardStatus = UILabel()
     private let zeehoStatus = StatusLabel()
     private let zeehoAddressField = UITextField()
@@ -441,8 +443,10 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         carLifeCard.addArrangedSubview(carLifeSettings)
         stack.addArrangedSubview(carLifeCard)
 
-        configureConnectionCard(zeehoCard, title: "极核 6.2 寸连接", symbol: "scooter", color: .systemBlue,
+        zeehoCardInstructions = configureConnectionCard(zeehoCard, title: "极核 6.2 寸连接", symbol: "scooter", color: .systemBlue,
             instructions: "让 iPhone 加入极核仪表 Wi-Fi，打开仪表投屏后启动 CarPlay。", status: zeehoCardStatus)
+        zeehoCardTitle = (zeehoCard.arrangedSubviews.first as? UIStackView)?
+            .arrangedSubviews.compactMap { $0 as? UILabel }.first
         let zeehoSettings = UIButton(type: .system)
         zeehoSettings.configuration = .tinted()
         zeehoSettings.configuration?.title = "连接设置"
@@ -1019,6 +1023,11 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         portStatus.text = browserPortError ?? (running ? "停止 CarPlay 后可修改端口。" : "启动 CarPlay 后即可打开上方地址。")
         let showsLocalOutput = modeControl.selectedSegmentIndex != 2
         zeehoCard.isHidden = !showsLocalOutput || !(outputMode == .zeeho || outputMode == .cfmoto)
+        let showingCFMoto = outputMode == .cfmoto
+        zeehoCardTitle?.text = showingCFMoto ? "春风 150SC-F 连接" : "极核 6.2 寸连接"
+        zeehoCardInstructions?.text = showingCFMoto
+            ? "让 iPhone 加入春风 150SC-F 仪表 Wi-Fi，打开仪表投屏后启动 CarPlay。"
+            : "让 iPhone 加入极核仪表 Wi-Fi，打开仪表投屏后启动 CarPlay。"
         if !running { updateZeehoStatus("等待启动 CarPlay · 仪表 IP：\(zeehoAddressField.text ?? "192.168.0.1")") }
         ninebotCard.isHidden = !showsLocalOutput || outputMode.ninebotMode == nil
         ninebotCardInstructions?.text = ninebotInstructions
