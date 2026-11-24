@@ -49,6 +49,7 @@ final class ZeehoOutput {
 
         private let connection: TailingConnection
         private let cfmotoDiagnostic: Bool
+        private var outputName: String { cfmotoDiagnostic ? "春风 150SC-F" : "极核" }
         private var videoWidth: Int { ZeehoOutput.width }
         private var videoHeight: Int { cfmotoDiagnostic ? 512 : ZeehoOutput.height }
         private var decoder: TailingH264Decoder?
@@ -84,7 +85,7 @@ final class ZeehoOutput {
         }
 
         func start() {
-            report("正在连接仪表（实验性 PXC 协议）…")
+            report("正在连接\(outputName)仪表…")
             DispatchQueue.global(qos: .userInitiated).async { [self] in
                 do {
                     try connection.start()
@@ -126,9 +127,13 @@ final class ZeehoOutput {
                         report("正在投屏 · 1024×\(videoHeight) · H.264")
                     }
                 } catch {
-                    if active {
-                        onLog("极核输出失败：\(error.localizedDescription)")
-                        report("极核连接失败：\(error.localizedDescription)")
+                    // A deliberate CarPlay stop closes media sockets to unblock
+                    // pending reads. Never present that expected shutdown as failure.
+                    if active && !connection.isClosingNormally {
+                        let reason = error.localizedDescription
+                            .replacingOccurrences(of: "台铃会话已关闭", with: "投屏会话已关闭")
+                        onLog("\(outputName)输出失败：\(reason)")
+                        report("\(outputName)连接失败：\(reason)")
                     }
                 }
                 connection.close()
@@ -263,7 +268,7 @@ final class ZeehoOutput {
 
         private func logCodecFailure(_ stage: String, _ error: Error) {
             let now = ProcessInfo.processInfo.systemUptime
-            if now - lastCodecFailure > 4 { onLog("极核\(stage)恢复：\(error.localizedDescription)") }
+            if now - lastCodecFailure > 4 { onLog("\(outputName)\(stage)恢复：\(error.localizedDescription)") }
             lastCodecFailure = now
         }
 
@@ -277,7 +282,7 @@ final class ZeehoOutput {
         }
 
         private func fail(_ error: Error) {
-            let message = "极核输出失败：\(error.localizedDescription)"
+            let message = "\(outputName)输出失败：\(error.localizedDescription)"
             onLog(message)
             report(message)
             close()
