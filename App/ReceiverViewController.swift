@@ -2,6 +2,7 @@ import UIKit
 import SwiftUI
 import AVKit
 import AVFoundation
+import MediaPlayer
 import Network
 import NetworkExtension
 import CoreLocation
@@ -182,6 +183,8 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     private lazy var pictureInPicture = CarPlayPictureInPicture(surface: videoSurface)
     private let keepAlive = BackgroundKeepAlive()
     private let keepAliveSwitch = UISwitch()
+    private let cfmotoHandlebarSwitch = UISwitch()
+    private let cfmotoHandlebarBridge = CFMotoHandlebarMediaBridge()
     private let headUnitOutput = ChoiceMenu(items: ["浏览器", "CarLife", "AirPlay", "台铃 4.3 寸", "九号 5 寸", "极核 6.2 寸", "九号 7 寸", "九号 4.3 寸（实验）", "春风 150SC-F"])
     private enum HeadUnitOutput: Int {
         case browser, carLife, airPlay, tailing, ninebot, zeeho, ninebotSeven, ninebot43, cfmoto
@@ -326,6 +329,14 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         channelField.keyboardType = .numberPad
         channelField.placeholder = "默认 36，一般无需修改"
         bluetoothSetupSwitch.addTarget(self, action: #selector(modeChanged), for: .valueChanged)
+        cfmotoHandlebarSwitch.isOn = UserDefaults.standard.bool(forKey: "cfmotoHandlebarAVRCP")
+        cfmotoHandlebarSwitch.addTarget(self, action: #selector(cfmotoHandlebarChanged), for: .valueChanged)
+        cfmotoHandlebarBridge.onKey = { [weak self] key in
+            guard let self, self.running, self.outputMode == .cfmoto,
+                  self.cfmotoHandlebarSwitch.isOn else { return }
+            self.log("春风车把蓝牙媒体键：\\(key.name) → CarPlay \\(key.control.title)")
+            self.receiver.press(key.control)
+        }
         modeControl.selectedSegmentIndex = UIDevice.current.userInterfaceIdiom == .phone ? 1 : 0
         modeControl.isHidden = UIDevice.current.userInterfaceIdiom == .phone
         modeControl.setEnabled(UIDevice.current.userInterfaceIdiom == .phone, forSegmentAt: 1)
@@ -1520,6 +1531,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         if keepAliveSwitch.isOn { keepAlive.start() }
         view.endEditing(true)
         running = true; modeControl.isEnabled = false; setEditing(false); startButton.setTitle("停止接收", for: .normal)
+        updateCFMotoHandlebarCapture()
         startButton.configuration?.image = UIImage(systemName: "stop.fill")
         UIApplication.shared.isIdleTimerDisabled = true; statusLabel.text = "正在启动接收服务…"
         receiver.onListening = { [weak self] port in
@@ -1617,6 +1629,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         updateAirPlayStatus("等待启动 CarPlay。")
         updateCarLifeStatus("等待启动 CarPlay。")
         running = false
+        cfmotoHandlebarBridge.stop()
         sessionHasVehicleButton = false
         screenAdaptation?.cancel(); screenAdaptation = nil
         reportedScreen = nil; primaryViewer = nil; pendingRestartReason = nil
@@ -1994,10 +2007,26 @@ extension ReceiverViewController {
         UserDefaults.standard.set(tailingAddressField.text ?? "", forKey: "tailingAddress")
         refreshVideoOutputSummary()
     }
+    @objc private func cfmotoHandlebarChanged() {
+        UserDefaults.standard.set(cfmotoHandlebarSwitch.isOn, forKey: "cfmotoHandlebarAVRCP")
+        updateCFMotoHandlebarCapture()
+    }
+
+    private func updateCFMotoHandlebarCapture() {
+        let shouldCapture = running && outputMode == .cfmoto && cfmotoHandlebarSwitch.isOn
+        if shouldCapture {
+            cfmotoHandlebarBridge.start()
+            log("春风车把蓝牙按键映射已监听（需先配对仪表蓝牙；iOS 可能不向本 App 分发 AVRCP）")
+        } else {
+            cfmotoHandlebarBridge.stop()
+        }
+    }
+
     @objc private func headUnitOutputChanged() {
         saveHeadUnitOutput()
         refreshVideoOutputSummary()
         updateVideoAspect()
+        updateCFMotoHandlebarCapture()
         reloadVisibleSettings()
     }
     @objc private func audioSettingChanged() {
@@ -2577,8 +2606,9 @@ extension ReceiverViewController {
                 return [SettingsSection("春风 150SC-F", footer: "让 iPhone 加入春风仪表 Wi-Fi，选择对应预设，打开仪表投屏后启动 CarPlay。", [
                     .field("仪表 IP 地址", zeehoAddressField, placeholder: "192.168.0.1"),
                     .action("扫描仪表二维码", icon: ("qrcode.viewfinder", .systemBlue)) { [unowned self] in self.scanCFMotoQRCode() },
+                    .control("车把蓝牙媒体键控制 CarPlay（实验）", cfmotoHandlebarSwitch),
                     .note(zeehoStatus)
-                ])]
+                ], footer: "先将 iPhone 与仪表蓝牙配对。上/下媒体键映射为 CarPlay 上一项/下一项，播放暂停键映射为确认。仅当 iOS 将这些 AVRCP 事件分发给 CarWithin 时有效；本功能不会改变蓝牙配对或音频路由。")]
             case .zeeho:
                 return [SettingsSection("极核 AE4 MAX2+ 6.2 寸", footer: "让 iPhone 加入仪表 Wi-Fi，选择同名预设。结束其他投屏，打开仪表投屏后启动 CarPlay。声音由 iPhone 或蓝牙输出。", [
                     .field("仪表 IP 地址", zeehoAddressField, placeholder: "192.168.0.1"),
@@ -3173,3 +3203,53 @@ extension ReceiverViewController {
     }
 }
 
+
+
+private final class CFMotoHandlebarMediaBridge {
+    enum Key {
+        case previous, next, togglePlayPause
+        var name: String {
+            switch self {
+            case .previous: return "上一曲"
+            case .next: return "下一曲"
+            case .togglePlayPause: return "播放/暂停"
+            }
+        }
+        var control: CarPlayControl {
+            switch self {
+            case .previous: return .knobPrevious
+            case .next: return .knobNext
+            case .togglePlayPause: return .select
+            }
+        }
+    }
+
+    var onKey: ((Key) -> Void)?
+    private var registered: [(MPRemoteCommand, Any)] = []
+
+    func start() {
+        guard registered.isEmpty else { return }
+        let center = MPRemoteCommandCenter.shared()
+        let commands: [(MPRemoteCommand, Key)] = [
+            (center.previousTrackCommand, .previous),
+            (center.nextTrackCommand, .next),
+            (center.togglePlayPauseCommand, .togglePlayPause)
+        ]
+        // Do not create a synthetic audio session or Now Playing item.
+        // iOS may reserve media keys for its active audio app.
+        for (command, key) in commands {
+            let handler = command.addTarget { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in self?.onKey?(key) }
+                return .success
+            }
+            registered.append((command, handler))
+        }
+    }
+
+    func stop() {
+        for (command, handler) in registered {
+            command.removeTarget(handler)
+        }
+        registered.removeAll()
+    }
+}
