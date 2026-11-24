@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        AAAAAAAA0000000000000001 /* ikcp.c in Sources */ = {isa = PBXBuildFile; fileRef = AAAAAAAA0000000000000003; };
+        AAAAAAAA0000000000000002 /* NinebotKCPVideo.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAAAAAAA0000000000000004; };
+        AAAAAAAA0000000000000005 /* KCP-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = AAAAAAAA0000000000000006; };
 		7E96AD8A0902263D7707A076 /* App/TailingSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = D69FD1F200ECE2D7FA951B51 /* App/TailingSocket.swift */; };
 		BF8C88925F55D6937482C442 /* App/TailingProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1742C549D25653794782E49 /* App/TailingProtocol.swift */; };
 		88C07C68A7CFD386DB471AF9 /* App/TailingOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15C6BB68729B79CB1589593B /* App/TailingOutput.swift */; };
@@ -20,6 +23,8 @@
 		F981D54C81AFEB10623F8DF2 /* App/TailingConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BAEDF1212F9D1065D1112FF /* App/TailingConnection.swift */; };
 		A3BC836AF3CEF11BA90F2319 /* App/HTTPSConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 710754EDDB93961D8CFD06B0 /* App/HTTPSConfiguration.swift */; };
 		08372A6889FA534DBA21968A /* Sources/TDSCarKitCore/Vendor/BigInt/Square Root.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6F318F2887324E3221684BE /* Sources/TDSCarKitCore/Vendor/BigInt/Square Root.swift */; };
+		094F299DB983C107B346E308 /* App/BundledIdentity/certificate.p7b in Resources */ = {isa = PBXBuildFile; fileRef = 11FDA53B72862F8349AA8821 /* App/BundledIdentity/certificate.p7b */; };
+		0E8D4D76E0A69F1E1ADD06B8 /* App/BundledIdentity/leaf.cer in Resources */ = {isa = PBXBuildFile; fileRef = EFFA91427D840EF5F33E7076 /* App/BundledIdentity/leaf.cer */; };
 		0EC86F455714F97754ED72C4 /* App/H264Surface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59DB484630DAD05A9DD9EA6F /* App/H264Surface.swift */; };
 		126D439CD3046DC754086477 /* Sources/TDSCarKitCore/Vendor/BigInt/GCD.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D9E496F6FDD084D2475F032 /* Sources/TDSCarKitCore/Vendor/BigInt/GCD.swift */; };
 		1295C99B088FC4C77ECE56E0 /* Sources/TDSCarKitCore/Vendor/BigInt/Data Conversion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 223EEAD835A8EB0DEE6C9168 /* Sources/TDSCarKitCore/Vendor/BigInt/Data Conversion.swift */; };
@@ -37,6 +42,7 @@
 		391CDD8430BE8B39EC436A3D /* Sources/TDSCarKitCore/RTSP.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C15547F7887F6D8488371E6 /* Sources/TDSCarKitCore/RTSP.swift */; };
 		3A2DD857D1CCC8A23FE24251 /* App/FragmentedMP4.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD9E2489FC88299405766913 /* App/FragmentedMP4.swift */; };
 		3E458D48F80DE06C2AB85CEC /* Sources/TDSCarKitCore/IAP2.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F6016C51C4785796B4E10AE /* Sources/TDSCarKitCore/IAP2.swift */; };
+		42710856210EB8AB1A71320B /* App/BundledIdentity/private.x963 in Resources */ = {isa = PBXBuildFile; fileRef = 8193AE9A71D92E1F0733213F /* App/BundledIdentity/private.x963 */; };
 		43112985E0A8F7FAAB956A9E /* App/ReceiverConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 354FC70B8CB0A837B12B807B /* App/ReceiverConfiguration.swift */; };
 		479AAD320AD81938B54B772C /* Sources/TDSCarKitCore/Vendor/BigInt/Strideable.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2AC7DC45475145DBFE5D529 /* Sources/TDSCarKitCore/Vendor/BigInt/Strideable.swift */; };
 		479C9B20E12A51FB78B1E04E /* Sources/TDSCarKitCore/AnnexB.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F5C1FCAA17FA67FE2BE494F /* Sources/TDSCarKitCore/AnnexB.swift */; };
@@ -89,6 +95,9 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+        AAAAAAAA0000000000000003 /* ikcp.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = App/ikcp.c; sourceTree = "<group>"; };
+        AAAAAAAA0000000000000004 /* NinebotKCPVideo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/NinebotKCPVideo.swift; sourceTree = "<group>"; };
+        AAAAAAAA0000000000000006 /* KCP-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "App/KCP-LICENSE.txt"; sourceTree = "<group>"; };
 		D69FD1F200ECE2D7FA951B51 /* App/TailingSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/TailingSocket.swift; sourceTree = "<group>"; };
 		E1742C549D25653794782E49 /* App/TailingProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/TailingProtocol.swift; sourceTree = "<group>"; };
 		15C6BB68729B79CB1589593B /* App/TailingOutput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/TailingOutput.swift; sourceTree = "<group>"; };
@@ -108,6 +117,7 @@
 		0D9E496F6FDD084D2475F032 /* Sources/TDSCarKitCore/Vendor/BigInt/GCD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/TDSCarKitCore/Vendor/BigInt/GCD.swift; sourceTree = "<group>"; };
 		0F5C1FCAA17FA67FE2BE494F /* Sources/TDSCarKitCore/AnnexB.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/TDSCarKitCore/AnnexB.swift; sourceTree = "<group>"; };
 		0FC063C47C1B6FBDC0FB3C93 /* App/BLEBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/BLEBootstrap.swift; sourceTree = "<group>"; };
+		11FDA53B72862F8349AA8821 /* App/BundledIdentity/certificate.p7b */ = {isa = PBXFileReference; lastKnownFileType = file; path = App/BundledIdentity/certificate.p7b; sourceTree = "<group>"; };
 		16E2A38BC8A7D4D0FB884AB6 /* App/CarPlayMediaSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/CarPlayMediaSession.swift; sourceTree = "<group>"; };
 		18BA2B2B0F1312E3F3B8DBA2 /* App/CarPlayPictureInPicture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/CarPlayPictureInPicture.swift; sourceTree = "<group>"; };
 		18C6E806A6C11F650900F11C /* Sources/TDSCarKitCore/BLEFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/TDSCarKitCore/BLEFrame.swift; sourceTree = "<group>"; };
@@ -143,6 +153,7 @@
 		77EA498A0CBD1F760370C8D4 /* Sources/TDSCarKitCore/Vendor/BigInt/Prime Test.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/TDSCarKitCore/Vendor/BigInt/Prime Test.swift"; sourceTree = "<group>"; };
 		7CF469AB54702446B6BF13AC /* Sources/TDSCarKitCore/Binary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/TDSCarKitCore/Binary.swift; sourceTree = "<group>"; };
 		7F9605296A9E8F64599C6D61 /* App/CarScreenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/CarScreenStore.swift; sourceTree = "<group>"; };
+		8193AE9A71D92E1F0733213F /* App/BundledIdentity/private.x963 */ = {isa = PBXFileReference; lastKnownFileType = text; path = App/BundledIdentity/private.x963; sourceTree = "<group>"; };
 		826A5AE3BFE61047AD29D186 /* Sources/TDSCarKitCore/Vendor/BigInt/Subtraction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/TDSCarKitCore/Vendor/BigInt/Subtraction.swift; sourceTree = "<group>"; };
 		88EE41E90E802F76407F8E4E /* App/AirPlayCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/AirPlayCredentials.swift; sourceTree = "<group>"; };
 		8C60B0AAF013CD73B180689D /* App/BrowserReceiverPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/BrowserReceiverPage.swift; sourceTree = "<group>"; };
@@ -165,6 +176,7 @@
 		D3F8C56D7B6DEA9C9CA53610 /* Sources/CTDSCarKitCrypto/TDSCarKitCrypto.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = Sources/CTDSCarKitCrypto/TDSCarKitCrypto.c; sourceTree = "<group>"; };
 		E6F318F2887324E3221684BE /* Sources/TDSCarKitCore/Vendor/BigInt/Square Root.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/TDSCarKitCore/Vendor/BigInt/Square Root.swift"; sourceTree = "<group>"; };
 		EF58C9479E75E06BDA321A90 /* Sources/TDSCarKitCore/Vendor/BigInt/Division.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/TDSCarKitCore/Vendor/BigInt/Division.swift; sourceTree = "<group>"; };
+		EFFA91427D840EF5F33E7076 /* App/BundledIdentity/leaf.cer */ = {isa = PBXFileReference; lastKnownFileType = file; path = App/BundledIdentity/leaf.cer; sourceTree = "<group>"; };
 		F17EB8379178EF804B1C9770 /* App/AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/AppDelegate.swift; sourceTree = "<group>"; };
 		FD01B522CF927B62CC738785 /* Sources/TDSCarKitCore/AudioStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sources/TDSCarKitCore/AudioStream.swift; sourceTree = "<group>"; };
 		7363CE38FC2E2B8EC79091DD /* App/AppReleaseService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/AppReleaseService.swift; sourceTree = "<group>"; };
@@ -191,6 +203,9 @@
 				15C6BB68729B79CB1589593B /* App/TailingOutput.swift */,
 				C9F89B7E1AD4F9FE63CB7E8F /* App/ZeehoOutput.swift */,
 				6AF3F2E542AC14DF20A41F8A /* App/NinebotH264Encoder.swift */,
+                AAAAAAAA0000000000000003 /* ikcp.c */,
+                AAAAAAAA0000000000000004 /* NinebotKCPVideo.swift */,
+                AAAAAAAA0000000000000006 /* KCP-LICENSE.txt */,
 				D6983BA5CA7041AE8981B978 /* App/NinebotUDPSocket.swift */,
 				E9D368B6A679BA4668F1A3B6 /* App/NinebotProtocol.swift */,
 				48E1C9F471B51889D986E066 /* App/NinebotOutput.swift */,
@@ -264,6 +279,9 @@
 				BC37FA0EF48A970C0777A23F /* Sources/TDSCarKitCore/Vendor/BigInt/Words and Bits.swift */,
 				39D3BE9150540F5D61B41B57 /* Sources/TDSCarKitCore/VideoCodec.swift */,
 				3685E330EC5277A9DD5661C6 /* App/Assets.xcassets */,
+				11FDA53B72862F8349AA8821 /* App/BundledIdentity/certificate.p7b */,
+				EFFA91427D840EF5F33E7076 /* App/BundledIdentity/leaf.cer */,
+				8193AE9A71D92E1F0733213F /* App/BundledIdentity/private.x963 */,
 				FBDC4F23F93125BBEEAE800C /* Products */,
 			);
 			sourceTree = "<group>";
@@ -328,6 +346,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				716E9590E60B3AFA6E62BF18 /* App/Assets.xcassets in Resources */,
+                AAAAAAAA0000000000000005 /* KCP-LICENSE.txt in Resources */,
+				094F299DB983C107B346E308 /* App/BundledIdentity/certificate.p7b in Resources */,
+				0E8D4D76E0A69F1E1ADD06B8 /* App/BundledIdentity/leaf.cer in Resources */,
+				42710856210EB8AB1A71320B /* App/BundledIdentity/private.x963 in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -347,6 +369,8 @@
 				73708DB94B38AB7D108A63DC /* App/NinebotUDPSocket.swift in Sources */,
 				787B68294EBA398040FCE3F1 /* App/NinebotProtocol.swift in Sources */,
 				38811CA28378E6A4820813DC /* App/NinebotOutput.swift in Sources */,
+                AAAAAAAA0000000000000001 /* ikcp.c in Sources */,
+                AAAAAAAA0000000000000002 /* NinebotKCPVideo.swift in Sources */,
 				BF8C88925F55D6937482C442 /* App/TailingProtocol.swift in Sources */,
 				7E96AD8A0902263D7707A076 /* App/TailingSocket.swift in Sources */,
 				A3BC836AF3CEF11BA90F2319 /* App/HTTPSConfiguration.swift in Sources */,
@@ -432,6 +456,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
+				DEVELOPMENT_TEAM = RZKQQ3XR26;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -469,6 +494,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
+				DEVELOPMENT_TEAM = RZKQQ3XR26;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;

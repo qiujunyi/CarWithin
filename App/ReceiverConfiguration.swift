@@ -29,6 +29,7 @@ struct ReceiverConfiguration {
     var zeehoAddress: String?
     var cfmotoDiagnostic = false
     var ninebotAddress: String?
+    var ninebotMode: NinebotOutput.Mode = .fiveInch
     var tailingAddress: String?
     var tailingPhoneInfo: TailingPhoneInfo?
     var carLinkRelayAddress: String?
@@ -132,7 +133,7 @@ struct ReceiverConfiguration {
             throw ConfigurationError("请选择属于本机当前网络连接的 IP 地址。")
         }
         // Fixed presets or a size that follows the head unit: even, within 320…3840 per side and
-        // at most 4K in area; frame rate 30–60 in steps of 5.
+        // at most 4K in area; the requested CarPlay frame rate is 30–60 in steps of 5.
         guard (320...3840).contains(width), (320...3840).contains(height), width % 2 == 0, height % 2 == 0,
               width * height <= 3840 * 2160,
               (30...60).contains(maxFPS), maxFPS % 5 == 0, (100...400).contains(widthPhysicalMM) else {

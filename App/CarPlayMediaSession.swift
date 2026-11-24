@@ -21,6 +21,7 @@ final class CarPlayMediaSession {
     private var screen: ScreenStream?
     private var cseq = 0
     private var videoPackets = 0
+    private var videoBytes = 0
     var onLog: ((String) -> Void)?
     var onBrowserAudio: ((Int, AVAudioPCMBuffer, UInt64) -> Void)?
     var onVideo: ((Data, VideoCodec) -> Void)?
@@ -69,12 +70,14 @@ final class CarPlayMediaSession {
                 video?.stop(); video = nil; videoListener?.stop()
                 screen = ScreenStream(secret: secret, connectionID: connectionID.uint64Value)
                 videoPackets = 0
+                videoBytes = 0
                 let listener = try MediaTCPListener(queue: queue, peerAddress: peerAddress); videoListener = listener
                 listener.onConnection = { [weak self] connection in
                     guard let self, self.video == nil else { connection.stop(); return }
                     self.video = connection; self.onLog?("视频 TCP 通道已连接")
                     connection.onBytes = { [weak self] bytes in
                         guard let self, let screen = self.screen else { return }
+                        self.videoBytes += bytes.count
                         do {
                             for unit in try screen.append(bytes) {
                                 self.videoPackets += 1
@@ -87,6 +90,7 @@ final class CarPlayMediaSession {
                     }
                     connection.onClose = { [weak self] in self?.video = nil; self?.onLog?("视频通道已关闭") }
                     connection.start()
+                    self.recoverFirstVideoUnit(on: connection, attempt: 1)
                 }
                 replies.append(["type": 110, "dataPort": listener.port])
                 onLog?("视频监听器已在端口 \(listener.port) 就绪")
@@ -107,6 +111,15 @@ final class CarPlayMediaSession {
             onLog?("事件/时钟同步监听器已就绪：\(listener.port)/\(timing!.port)")
         }
         return try PropertyListSerialization.data(fromPropertyList: response, format: .binary, options: 0)
+    }
+
+    private func recoverFirstVideoUnit(on connection: MediaTCPConnection, attempt: Int) {
+        queue.asyncAfter(deadline: .now() + (attempt == 1 ? 2 : 3)) { [weak self, weak connection] in
+            guard let self, let connection, self.video === connection, self.videoPackets == 0 else { return }
+            let sent = self.requestKeyFrame()
+            self.onLog?("等待首帧：视频 TCP 已读 \(self.videoBytes) 字节，第 \(attempt) 次关键帧请求\(sent ? "已发送" : "未发送")")
+            if attempt < 2 { self.recoverFirstVideoUnit(on: connection, attempt: attempt + 1) }
+        }
     }
     private func acceptEvent(_ connection: MediaTCPConnection) {
         guard event == nil else { connection.stop(); return }

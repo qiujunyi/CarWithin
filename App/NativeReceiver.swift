@@ -99,10 +99,10 @@ final class NativeReceiver {
                 self.zeeho.start(localAddress: configuration.address, targetAddress: target, phone: phone, cfmotoDiagnostic: configuration.cfmotoDiagnostic,
                     onState: { [weak self] in self?.onZeehoState?($0) },
                     onLog: { [weak self] in self?.log($0) },
-                    requestKeyframe: { [weak self] in self?.requestKeyFrame(reason: configuration.cfmotoDiagnostic ? "春风诊断解码恢复" : "极核解码恢复") })
+                    requestKeyframe: { [weak self] in self?.requestKeyFrame(reason: configuration.cfmotoDiagnostic ? "春风解码恢复" : "极核解码恢复") })
             }
             if let target = configuration.ninebotAddress {
-                self.ninebot.start(localAddress: configuration.address, targetAddress: target,
+                self.ninebot.start(localAddress: configuration.address, targetAddress: target, mode: configuration.ninebotMode,
                     onState: { [weak self] in self?.onNinebotState?($0) },
                     onLog: { [weak self] in self?.log($0) },
                     requestKeyframe: { [weak self] in self?.requestKeyFrame(reason: "九号解码恢复") })
@@ -141,7 +141,7 @@ final class NativeReceiver {
                                        width: configuration.width, height: configuration.height, fps: configuration.maxFPS,
                                        performance: configuration.browserPerformance, showTouches: configuration.showTouches,
                                        preferredViewer: preferredViewer, browserAudio: configuration.browserAudio,
-                                       airPlayStreamID: configuration.airPlayStreamID)
+                                       airPlayStreamID: configuration.airPlayStreamID, airPlayAddress: configuration.address)
             }
             do { self.airPlayIdentity = advertise ? try AirPlayCredentials() : nil }
             catch { self.fail("AirPlay 身份创建失败：\(error.localizedDescription)"); return }

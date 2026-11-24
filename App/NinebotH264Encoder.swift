@@ -104,7 +104,8 @@ final class H264Encoder {
     private let callbackBox = H264CallbackBox()
     private let fps: Int
 
-    init(width: Int, height: Int, fps: Int, bitrate: Int, output: @escaping (Result<H264EncodedFrame, Error>) -> Void) throws {
+    init(width: Int, height: Int, fps: Int, bitrate: Int, profileLevel: CFString = kVTProfileLevel_H264_Baseline_AutoLevel,
+         output: @escaping (Result<H264EncodedFrame, Error>) -> Void) throws {
         self.fps = fps
         callbackBox.handler = output
 
@@ -137,7 +138,7 @@ final class H264Encoder {
         guard status == noErr, let created else { throw H264EncoderError.create(status) }
         session = created
         do {
-            try configure(created, bitrate: bitrate)
+            try configure(created, bitrate: bitrate, profileLevel: profileLevel)
         } catch {
             VTCompressionSessionInvalidate(created)
             session = nil
@@ -145,11 +146,11 @@ final class H264Encoder {
         }
     }
 
-    private func configure(_ created: VTCompressionSession, bitrate: Int) throws {
+    private func configure(_ created: VTCompressionSession, bitrate: Int, profileLevel: CFString) throws {
         do {
             try set(kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
             try set(kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
-            try set(kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_Baseline_AutoLevel)
+            try set(kVTCompressionPropertyKey_ProfileLevel, value: profileLevel)
             try set(kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
             try set(kVTCompressionPropertyKey_ExpectedFrameRate, value: fps as CFNumber)
             // 关键帧节奏由 MirrorSession 每 0.5 秒强制请求（与官方 iOS 抓包、Android 版一致）；

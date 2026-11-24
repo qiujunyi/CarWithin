@@ -34,6 +34,9 @@ public final class ScreenStream {
                     let plain = try ChaChaPoly.open(box, using: key, authenticating: header)
                     counter += 1; result.append(try Self.annexB(plain))
                 case 1:
+                    // iOS can send a header-only configuration record before the next
+                    // real codec configuration. Keep the previous codec and stream open.
+                    guard !body.isEmpty else { continue }
                     let parsed: (VideoCodec, Data)
                     do { parsed = try Self.configuration(body) }
                     catch {

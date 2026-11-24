@@ -20,7 +20,7 @@ def uid(name): return hashlib.sha1(name.encode()).hexdigest()[:24].upper()
 def q(value): return json.dumps(str(value))
 objects = []
 def add(key, value): objects.append(f'{uid(key)} = {{ {value} }};'); return uid(key)
-sources = sorted([*root.glob('App/*.swift'), *root.glob('App/*.m'), *root.rglob('Sources/TDSCarKitCore/**/*.swift'), *root.glob('Sources/CTDSCarKitCrypto/*.c')])
+sources = sorted([*root.glob('App/*.swift'), *root.glob('App/*.m'), *root.glob('App/*.c'), *root.rglob('Sources/TDSCarKitCore/**/*.swift'), *root.glob('Sources/CTDSCarKitCrypto/*.c')])
 refs = []; builds = []
 for path in sources:
     relative = str(path.relative_to(root))
@@ -32,6 +32,10 @@ assets = add('assets', 'isa = PBXFileReference; lastKnownFileType = folder.asset
 refs.append(assets)
 asset_resource = add('assets-build', f'isa = PBXBuildFile; fileRef = {assets};')
 resource_builds = [asset_resource]
+license_path = 'App/KCP-LICENSE.txt'
+license_ref = add('ref:'+license_path, f'isa = PBXFileReference; lastKnownFileType = text; path = {q(license_path)}; sourceTree = "<group>";')
+refs.append(license_ref)
+resource_builds.append(add('build:'+license_path, f'isa = PBXBuildFile; fileRef = {license_ref};'))
 # Bundle any staged MFi identity files at the app bundle root so the app can load them directly.
 for path in sorted(root.glob('App/BundledIdentity/*')):
     relative = str(path.relative_to(root))

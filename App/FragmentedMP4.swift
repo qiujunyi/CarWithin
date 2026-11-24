@@ -131,7 +131,9 @@ final class CarPlayHLS {
     }
 
     let id: UUID
+    private let baseURL: String
     private var initialization: Data?
+    private var codecString: String?
     private var segments: [Segment] = []
     private var pending = Data()
     private var pendingFrames = 0
@@ -143,13 +145,17 @@ final class CarPlayHLS {
     private var announced = false
     private var formatGeneration = 0
 
-    init(id: UUID) { self.id = id }
+    init(id: UUID, origin: String) {
+        self.id = id
+        baseURL = "\(origin)/airplay/\(id.uuidString)"
+    }
 
     func append(sample: Data, keyframe: Bool, format: FragmentedMP4.Format, arrivalUs: UInt64) -> Event {
         if initialization != format.initializationSegment {
             if initialization != nil { formatGeneration += 1 }
             discardPending()
             initialization = format.initializationSegment
+            codecString = format.codecString
             segments.removeAll()
         }
         if keyframe, pendingFrames > 0 {
@@ -193,13 +199,18 @@ final class CarPlayHLS {
         let prefix = "/airplay/\(id.uuidString)/"
         guard path.hasPrefix(prefix) else { return nil }
         let tail = path.dropFirst(prefix.count)
+        if tail == "master.m3u8", let codecString, !segments.isEmpty {
+            let bandwidth = segments.map { Int(ceil(Double($0.data.count * 8) / $0.duration)) }.max() ?? 0
+            let text = "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-STREAM-INF:BANDWIDTH=\(max(20_000_000, bandwidth)),CODECS=\"\(codecString)\"\n\(baseURL)/index.m3u8\n"
+            return ("application/vnd.apple.mpegurl", Data(text.utf8))
+        }
         if tail == "index.m3u8", let first = segments.first {
             var text = "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-TARGETDURATION:\(Self.targetDuration)\n"
             text += "#EXT-X-MEDIA-SEQUENCE:\(first.number)\n#EXT-X-DISCONTINUITY-SEQUENCE:\(formatGeneration)\n"
-            text += "#EXT-X-MAP:URI=\"init-\(formatGeneration).mp4\"\n"
+            text += "#EXT-X-MAP:URI=\"\(baseURL)/init-\(formatGeneration).mp4\"\n"
             for segment in segments {
                 text += String(format: "#EXTINF:%.3f,\n", locale: Locale(identifier: "en_US_POSIX"), segment.duration)
-                text += "\(segment.number).m4s\n"
+                text += "\(baseURL)/\(segment.number).m4s\n"
             }
             return ("application/vnd.apple.mpegurl", Data(text.utf8))
         }

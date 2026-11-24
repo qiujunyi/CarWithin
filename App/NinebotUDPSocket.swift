@@ -51,7 +51,7 @@ final class NinebotUDPSocket: @unchecked Sendable {
 
     /// 非阻塞发送。发送缓冲区满（EAGAIN/ENOBUFS）时短暂退避重试，
     /// 仍失败则抛出 `NinebotSocketError.isTransient == true` 的错误，由调用方决定丢帧还是终止。
-    func send(_ data: Data) throws {
+    func send(_ data: Data, retryOnBackpressure: Bool = true) throws {
         lock.lock()
         defer { lock.unlock() }
         guard descriptor >= 0 else { throw NinebotSocketError.closed }
@@ -67,7 +67,7 @@ final class NinebotUDPSocket: @unchecked Sendable {
                 return
             }
             let retryable = code == EAGAIN || code == EWOULDBLOCK || code == ENOBUFS || code == EINTR
-            guard retryable, attempt < 4 else { throw NinebotSocketError.operation("发送 UDP 数据", code) }
+            guard retryOnBackpressure, retryable, attempt < 4 else { throw NinebotSocketError.operation("发送 UDP 数据", code) }
             attempt += 1
             // 1 + 2 + 3 + 4 ms，最坏约 10 ms，给 Wi-Fi 驱动队列排空的时间
             usleep(useconds_t(1_000 * attempt))

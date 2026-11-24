@@ -3,7 +3,7 @@ name: Build unsigned iOS IPA
 on:
   workflow_dispatch:
   push:
-    branches: [main, cfmoto-150scf-diagnostics]
+    branches: [main, cfmoto-150scf-diagnostics, cfmoto-150scf-v104]
     paths:
       - '.github/workflows/ios-unsigned.yml'
       - 'App/**'
@@ -80,7 +80,7 @@ jobs:
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: CarWithin-CFMOTO-diagnostic-unsigned-ipa
+          name: CarWithin-CFMOTO-150SCF-v104-unsigned-ipa
           path: CarWithin-unsigned.ipa
           if-no-files-found: error
           retention-days: 7

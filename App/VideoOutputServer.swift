@@ -108,6 +108,9 @@ final class VideoOutputServer {
     private var showTouches = false
     private var browserAudio = false
     private var hls: CarPlayHLS?
+    #if DEBUG
+    private var airPlayRequestDiagnostics = Set<String>()
+    #endif
     var onAirPlayReady: ((UUID) -> Void)?
 
     private var viewerCount: Int { clients.values.filter { $0.mode != .request }.count }
@@ -115,11 +118,12 @@ final class VideoOutputServer {
 
     func start(port: UInt16, securePort: UInt16? = nil, width: Int, height: Int, fps: Int,
                performance: BrowserPerformance = .auto, showTouches: Bool = false, preferredViewer: UUID? = nil,
-               browserAudio: Bool = false, airPlayStreamID: UUID? = nil) {
+               browserAudio: Bool = false, airPlayStreamID: UUID? = nil, airPlayAddress: String? = nil) {
         queue.async { [weak self] in
             self?.performance = performance; self?.showTouches = showTouches
             self?.startOnQueue(port: port, securePort: securePort, width: width, height: height, fps: fps,
-                               preferredViewer: preferredViewer, browserAudio: browserAudio, airPlayStreamID: airPlayStreamID)
+                               preferredViewer: preferredViewer, browserAudio: browserAudio, airPlayStreamID: airPlayStreamID,
+                               airPlayAddress: airPlayAddress)
         }
     }
 
@@ -164,10 +168,12 @@ final class VideoOutputServer {
     // MARK: Listener
 
     private func startOnQueue(port: UInt16, securePort: UInt16?, width: Int, height: Int, fps: Int, preferredViewer: UUID?,
-                              browserAudio: Bool, airPlayStreamID: UUID?) {
+                              browserAudio: Bool, airPlayStreamID: UUID?, airPlayAddress: String?) {
         stopOnQueue()
         self.browserAudio = browserAudio
-        if let airPlayStreamID { hls = CarPlayHLS(id: airPlayStreamID) }
+        if let airPlayStreamID, let airPlayAddress {
+            hls = CarPlayHLS(id: airPlayStreamID, origin: "http://\(airPlayAddress):\(port)")
+        }
         self.width = width; self.height = height; self.fps = fps
         let run = generation
         returningViewer = preferredViewer
@@ -279,8 +285,14 @@ final class VideoOutputServer {
         let headerText = String(decoding: client.buffer.prefix(upTo: end), as: UTF8.self)
         let lines = headerText.components(separatedBy: "\r\n")
         let request = lines.first?.split(separator: " ") ?? []
-        guard request.count == 3, request[0] == "GET" else { reject(client, status: "405 Method Not Allowed"); return }
+        guard request.count == 3 else { reject(client, status: "405 Method Not Allowed"); return }
         let path = String(request[1]).split(separator: "?", maxSplits: 1).first.map(String.init) ?? "/"
+        guard request[0] == "GET" else {
+            #if DEBUG
+            logAirPlayRequest(from: client.peer, method: String(request[0]), path: path, status: 405)
+            #endif
+            reject(client, status: "405 Method Not Allowed"); return
+        }
         var headers: [String: String] = [:]
         for line in lines.dropFirst() {
             guard let colon = line.firstIndex(of: ":") else { continue }
@@ -288,7 +300,11 @@ final class VideoOutputServer {
         }
         client.buffer.removeAll(keepingCapacity: false)
         if let hls {
-            guard let resource = hls.resource(at: path) else { reject(client, status: "404 Not Found"); return }
+            let resource = hls.resource(at: path)
+            #if DEBUG
+            logAirPlayRequest(from: client.peer, method: "GET", path: path, status: resource == nil ? 404 : 200)
+            #endif
+            guard let resource else { reject(client, status: "404 Not Found"); return }
             sendHTTP(status: "200 OK", contentType: resource.type, body: resource.body, to: client.connection) { [weak self, weak client] in
                 guard let self, let client else { return }
                 self.close(client, reason: nil)
@@ -704,10 +720,22 @@ final class VideoOutputServer {
         else if client.mode != .request { report("\(client.peer) 已断开（剩余 \(viewerCount) 台）") }
     }
 
+    #if DEBUG
+    private func logAirPlayRequest(from peer: String, method: String, path: String, status: Int) {
+        guard hls != nil else { return }
+        let kind = path.hasSuffix(".m3u8") ? "播放列表" : path.hasSuffix(".mp4") ? "初始化段" : path.hasSuffix(".m4s") ? "视频分段" : "其他资源"
+        let message = "AirPlay HTTP：\(peer) \(String(method.prefix(12))) \(kind) → \(status)"
+        if airPlayRequestDiagnostics.count < 24, airPlayRequestDiagnostics.insert(message).inserted { onLog?(message) }
+    }
+    #endif
+
     private func stopOnQueue() {
         generation = UUID(); listener?.cancel(); listener = nil
         secureListener?.cancel(); secureListener = nil; securePort = nil
         httpsRoot = nil; hls = nil; browserAudio = false
+        #if DEBUG
+        airPlayRequestDiagnostics.removeAll()
+        #endif
         for client in Array(clients.values) {
             if client.touching { onTouches?(client.id.uuidString, []) }
             client.connection.cancel()
