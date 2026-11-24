@@ -65,7 +65,7 @@ final class TailingConnection: @unchecked Sendable {
     private var controlConnected = false
     private var auxiliaryConnected = false
     private var isZeeho: Bool { profile.isZeeho }
-    private var dashboard: String { profile.isCFMotoDiagnostic ? "春风150SC-F诊断" : (profile.isZeeho ? "极核" : "台铃") }
+    private var dashboard: String { profile.isCFMotoDiagnostic ? "春风 150SC-F" : (profile.isZeeho ? "极核" : "台铃") }
 
     init(localIP: String, targetIP: String, profile: TailingDisplayProfile, phone: TailingPhoneInfo,
          ports: TailingPorts = .ios, identityProvider: @escaping () throws -> TailingIdentity = TailingIdentity.load,
@@ -76,7 +76,7 @@ final class TailingConnection: @unchecked Sendable {
 
     func start() throws {
         if profile.isCFMotoDiagnostic {
-            log("春风诊断模式：实验性 PXC 协商；编码尺寸 1024×512（仪表请求画面 1024×515）")
+            log("春风 150SC-F：EasyConn 会话；视频编码 1024×512（仪表请求 1024×515）")
         }
         // EasyConn legacy CFMOTO is independently authenticated by the bike
         // using a session-local RSA-1024 key. MFi/iAP2 authentication is separate
@@ -203,6 +203,14 @@ final class TailingConnection: @unchecked Sendable {
                                                      Int(request.command), request.payload.count))
         }
         return (socket, pullWait)
+    }
+
+    /// True only when the session was deliberately closed without a transport failure.
+    /// Lets presentation code avoid reporting the expected socket wake-up as an error.
+    var isClosingNormally: Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        return closed && failure == nil
     }
 
     func checkHealth() throws {
