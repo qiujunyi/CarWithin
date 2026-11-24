@@ -334,7 +334,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         cfmotoHandlebarBridge.onKey = { [weak self] key in
             guard let self, self.running, self.outputMode == .cfmoto,
                   self.cfmotoHandlebarSwitch.isOn else { return }
-            self.log("春风车把蓝牙媒体键：\\(key.name) → CarPlay \\(key.control.title)")
+            self.log("春风车把蓝牙媒体键：\(key.name) → CarPlay \(key.control.title)")
             self.receiver.press(key.control)
         }
         modeControl.selectedSegmentIndex = UIDevice.current.userInterfaceIdiom == .phone ? 1 : 0
@@ -2603,12 +2603,12 @@ extension ReceiverViewController {
             case .airPlay: return airPlayOutputSections()
             case .tailing: return tailingOutputSections()
             case .cfmoto:
-                return [SettingsSection("春风 150SC-F", footer: "让 iPhone 加入春风仪表 Wi-Fi，选择对应预设，打开仪表投屏后启动 CarPlay。", [
+                return [SettingsSection("春风 150SC-F", footer: "先配对春风仪表蓝牙并加入仪表 Wi-Fi，然后打开投屏并启动 CarPlay。媒体键映射是实验功能：iOS 可能将蓝牙按键交给其他音频 App。", [
                     .field("仪表 IP 地址", zeehoAddressField, placeholder: "192.168.0.1"),
                     .action("扫描仪表二维码", icon: ("qrcode.viewfinder", .systemBlue)) { [unowned self] in self.scanCFMotoQRCode() },
                     .control("车把蓝牙媒体键控制 CarPlay（实验）", cfmotoHandlebarSwitch),
                     .note(zeehoStatus)
-                ], footer: "先将 iPhone 与仪表蓝牙配对。上/下媒体键映射为 CarPlay 上一项/下一项，播放暂停键映射为确认。仅当 iOS 将这些 AVRCP 事件分发给 CarWithin 时有效；本功能不会改变蓝牙配对或音频路由。")]
+                ])]
             case .zeeho:
                 return [SettingsSection("极核 AE4 MAX2+ 6.2 寸", footer: "让 iPhone 加入仪表 Wi-Fi，选择同名预设。结束其他投屏，打开仪表投屏后启动 CarPlay。声音由 iPhone 或蓝牙输出。", [
                     .field("仪表 IP 地址", zeehoAddressField, placeholder: "192.168.0.1"),
