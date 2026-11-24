@@ -29,6 +29,20 @@ jobs:
           xcodebuild -version
           xcodebuild -list -project TDSCarKit.xcodeproj
 
+      # Upstream 1.0.4 Xcode project references non-public MFi resources.
+      # Supply harmless build-only placeholders; the original user's authorized
+      # MFi identity is inserted locally after the unsigned IPA is downloaded.
+      # NEVER commit or upload real private.x963 or certificate material.
+      - name: Prepare MFi resource placeholders for unsigned CI build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p App/BundledIdentity
+          for name in certificate.p7b leaf.cer private.x963; do
+            test ! -s "App/BundledIdentity/$name"
+            printf 'UNSIGNED_CI_PLACEHOLDER_NOT_A_CERTIFICATE\\n' > "App/BundledIdentity/$name"
+          done
+
       - name: Build for physical iPhone without signing
         shell: bash
         run: |
