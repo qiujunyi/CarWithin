@@ -335,6 +335,9 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         cfmotoHandlebarSwitch.addTarget(self, action: #selector(cfmotoHandlebarChanged), for: .valueChanged)
         cfmotoVolumeNavigationSwitch.isOn = UserDefaults.standard.bool(forKey: "cfmotoVolumeNavigation")
         cfmotoVolumeNavigationSwitch.addTarget(self, action: #selector(cfmotoVolumeNavigationChanged), for: .valueChanged)
+        cfmotoVolumeNavigation.onDiagnostic = { [weak self] message in
+            self?.log("春风音量诊断：\(message)")
+        }
         cfmotoVolumeNavigation.onChange = { [weak self] oldVolume, newVolume, control in
             guard let self, self.running, self.outputMode == .cfmoto,
                   self.cfmotoVolumeNavigationSwitch.isOn else { return }
@@ -2020,6 +2023,7 @@ extension ReceiverViewController {
     }
     @objc private func cfmotoVolumeNavigationChanged() {
         UserDefaults.standard.set(cfmotoVolumeNavigationSwitch.isOn, forKey: "cfmotoVolumeNavigation")
+        log("春风音量诊断：用户将音量实验开关设为 \(cfmotoVolumeNavigationSwitch.isOn ? "开启" : "关闭")；投屏运行=\(running)")
         updateCFMotoHandlebarCapture()
     }
 
@@ -2029,6 +2033,9 @@ extension ReceiverViewController {
     }
 
     private func updateCFMotoHandlebarCapture() {
+        if outputMode == .cfmoto {
+            log("春风音量诊断：监听条件：CarPlay运行=\(running)，开关=\(cfmotoVolumeNavigationSwitch.isOn)，AVRCP开关=\(cfmotoHandlebarSwitch.isOn)")
+        }
         let observeVolume = running && outputMode == .cfmoto && cfmotoVolumeNavigationSwitch.isOn
         if observeVolume {
             if cfmotoVolumeNavigation.start() {
@@ -3282,40 +3289,82 @@ private final class CFMotoHandlebarMediaBridge {
 
 private final class CFMotoVolumeNavigation {
     var onChange: ((Float, Float, CarPlayControl) -> Void)?
+    var onDiagnostic: ((String) -> Void)?
     private var volumeObservation: NSKeyValueObservation?
+    private var sampleTimer: Timer?
+    private var routeObserver: NSObjectProtocol?
     private var previousVolume: Float?
     private var lastEventAt: TimeInterval = 0
+    private var unchangedSamples = 0
+    private var lastReportedVolume: Float?
 
-    /// Observes public media-volume changes only. Never forces AVAudioSession
-    /// activation, changes output route, or writes volume back to the system.
+    /// Observe only; never activate the audio session or change the user's volume.
+    /// Run a read-only timer in addition to KVO, since some audio routes suppress KVO.
     @discardableResult func start() -> Bool {
         guard volumeObservation == nil else { return false }
         let session = AVAudioSession.sharedInstance()
         previousVolume = session.outputVolume
+        lastReportedVolume = session.outputVolume
+        unchangedSamples = 0
         lastEventAt = 0
-        volumeObservation = session.observe(\.outputVolume, options: [.new]) { [weak self] session, change in
+        let route = session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")
+        onDiagnostic?(String(format: "观察器启动，初始音量=%.3f，音频路由=%@，类别=%@", session.outputVolume, route, session.category.rawValue))
+        volumeObservation = session.observe(\.outputVolume, options: [.new]) { [weak self] _, change in
             guard let self, let newVolume = change.newValue else { return }
             DispatchQueue.main.async { [weak self] in
-                self?.handle(newVolume)
+                self?.sample(newVolume, source: "KVO")
             }
         }
+        routeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: session, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.volumeObservation != nil else { return }
+            let route = session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")
+            self.onDiagnostic?("音频路由变化：\(route)，重新建立音量基线")
+            self.previousVolume = session.outputVolume
+        }
+        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            guard let self, self.volumeObservation != nil else { return }
+            self.sample(session.outputVolume, source: "轮询")
+            self.unchangedSamples += 1
+            if self.unchangedSamples == 20 {
+                let volume = session.outputVolume
+                let route = session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")
+                self.onDiagnostic?(String(format: "5秒采样：当前音量=%.3f，路由=%@；如果按键后此值不变，iOS可能没有向本App暴露车把音量变化", volume, route))
+                self.unchangedSamples = 0
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        sampleTimer = timer
         return true
     }
 
     func stop() {
+        guard volumeObservation != nil || sampleTimer != nil else { return }
+        onDiagnostic?("观察器已停止")
+        sampleTimer?.invalidate()
+        sampleTimer = nil
+        if let routeObserver { NotificationCenter.default.removeObserver(routeObserver) }
+        routeObserver = nil
         volumeObservation?.invalidate()
         volumeObservation = nil
         previousVolume = nil
+        lastReportedVolume = nil
+        unchangedSamples = 0
         lastEventAt = 0
     }
 
-    private func handle(_ newVolume: Float) {
+    private func sample(_ newVolume: Float, source: String) {
         guard volumeObservation != nil, let oldVolume = previousVolume else { return }
         previousVolume = newVolume
         let delta = newVolume - oldVolume
-        // Ignore tiny fluctuations and rapid duplicates from route updates.
         guard abs(delta) >= 0.008 else { return }
         let now = ProcessInfo.processInfo.systemUptime
+        if abs(newVolume - (lastReportedVolume ?? -1)) >= 0.008 {
+            onDiagnostic?(String(format: "%@ 检测变化 %.3f → %.3f（差值%+.3f）", source, oldVolume, newVolume, delta))
+            lastReportedVolume = newVolume
+            unchangedSamples = 0
+        }
         guard now - lastEventAt >= 0.10 else { return }
         lastEventAt = now
         onChange?(oldVolume, newVolume, delta > 0 ? .knobPrevious : .knobNext)
