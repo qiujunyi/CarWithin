@@ -103,7 +103,8 @@ final class ZeehoOutput {
                         try connection.waitForH264Request()
                         nextFrame = ProcessInfo.processInfo.systemUptime + 1.0 / Double(ZeehoOutput.fps)
                         guard active else { break }
-                        let resumed = cfmotoDiagnostic && ProcessInfo.processInfo.systemUptime - lastSentAt >= 1
+                        let channelRestarted = connection.consumeResumeKeyframe()
+                        let resumed = cfmotoDiagnostic && (channelRestarted || ProcessInfo.processInfo.systemUptime - lastSentAt >= 1)
                         let result = queue.sync { () -> H264EncodedFrame? in
                             guard active, let image = latest else { return nil }
                             return encode(image, at: ProcessInfo.processInfo.systemUptime, forceKeyframe: first || resumed)

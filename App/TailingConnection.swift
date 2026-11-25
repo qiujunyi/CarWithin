@@ -180,6 +180,15 @@ final class TailingConnection: @unchecked Sendable {
         }
     }
 
+    private var resumeKeyframePending = false
+
+    func consumeResumeKeyframe() -> Bool {
+        condition.lock(); defer { condition.unlock() }
+        let pending = resumeKeyframePending
+        resumeKeyframePending = false
+        return pending
+    }
+
     private func videoSocket() throws -> TailingSocket {
         condition.lock()
         defer { condition.unlock() }
@@ -308,9 +317,18 @@ final class TailingConnection: @unchecked Sendable {
                 condition.unlock()
                 if port == ports.video {
                     condition.lock()
-                    if video == nil && !closed { video = socket; condition.broadcast() }
-                    else { socket.close() }
-                    condition.unlock()
+                    if !closed && (video == nil || profile.isCFMotoDiagnostic) {
+                        let previous = video
+                        video = socket
+                        if profile.isCFMotoDiagnostic { resumeKeyframePending = true }
+                        if let previous { resources.removeAll { $0 === previous } }
+                        condition.broadcast()
+                        condition.unlock()
+                        previous?.close()
+                    } else {
+                        condition.unlock()
+                        socket.close()
+                    }
                 } else {
                     DispatchQueue.global(qos: .userInitiated).async { [self] in
                         do {
