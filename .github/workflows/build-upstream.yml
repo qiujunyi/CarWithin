@@ -1,0 +1,35 @@
+name: Build upstream IPA
+on:
+  push:
+    branches: [build-upstream-20261125]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build iPhone application
+        run: |
+          set -euo pipefail
+          xcodebuild -project TDSCarKit.xcodeproj -scheme TDSCarKit -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" TDS_WIFI_ENTITLEMENTS="" build
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+          mkdir -p package/Payload
+          cp -R build/Build/Products/Release-iphoneos/TDSCarKit.app package/Payload/
+          cd package
+          zip -qry ../CarWithin-upstream-50f7ded-unsigned.ipa Payload
+          cd ..
+          unzip -t CarWithin-upstream-50f7ded-unsigned.ipa
+          shasum -a 256 CarWithin-upstream-50f7ded-unsigned.ipa > SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CarWithin-upstream-50f7ded-unsigned
+          path: |
+            CarWithin-upstream-50f7ded-unsigned.ipa
+            SHA256.txt
+          if-no-files-found: error
+          retention-days: 14
