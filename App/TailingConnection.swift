@@ -184,25 +184,54 @@ final class TailingConnection: @unchecked Sendable {
         condition.lock()
         defer { condition.unlock() }
         try checkLocked()
+        while profile.isCFMotoDiagnostic && video == nil {
+            condition.wait()
+            try checkLocked()
+        }
         guard let video else { throw TailingError.closed }
         return video
     }
 
     private func readFrameRequest() throws -> (TailingSocket, TimeInterval) {
-        let socket = try videoSocket()
         let pullStarted = ProcessInfo.processInfo.systemUptime
-        let request: TailingProtocol.Auxiliary
-        do {
-            request = try TailingProtocol.readAuxiliary { try socket.readExactly($0, timeout: 5) }
-        } catch {
-            throw terminalError(or: TailingError.channel("等待视频拉帧请求", error))
+        while true {
+            let socket = try videoSocket()
+            let request: TailingProtocol.Auxiliary
+            do {
+                // BACK may leave the video socket idle indefinitely. Only the first
+                // byte waits indefinitely; partial headers/payloads retain a deadline.
+                var readingHeader = true
+                request = try TailingProtocol.readAuxiliary { count in
+                    defer { readingHeader = false }
+                    return try socket.readExactly(count, timeout: 5,
+                        waitForFirstByte: profile.isCFMotoDiagnostic && readingHeader)
+                }
+            } catch {
+                if profile.isCFMotoDiagnostic, let transport = error as? TailingError,
+                   case .closed = transport {
+                    condition.lock()
+                    let recover = !closed && failure == nil
+                    if recover && video === socket { video = nil }
+                    if recover { resources.removeAll { $0 === socket } }
+                    condition.unlock()
+                    if recover {
+                        socket.close()
+                        log("春风视频通道已退出，保留会话等待仪表回连（SET）")
+                        continue
+                    }
+                }
+                throw terminalError(or: TailingError.channel("等待视频拉帧请求", error))
+            }
+            let pullWait = ProcessInfo.processInfo.systemUptime - pullStarted
+            guard request.command == 0x72, request.payload.isEmpty else {
+                throw TailingError.protocolFailure(String(format: "视频通道收到 0x%04x（%d 字节），预期空载荷 0x72",
+                                                         Int(request.command), request.payload.count))
+            }
+            if profile.isCFMotoDiagnostic && pullWait >= 1 {
+                log("春风仪表恢复取帧，继续投屏")
+            }
+            return (socket, pullWait)
         }
-        let pullWait = ProcessInfo.processInfo.systemUptime - pullStarted
-        guard request.command == 0x72, request.payload.isEmpty else {
-            throw TailingError.protocolFailure(String(format: "视频通道收到 0x%04x（%d 字节），预期空载荷 0x72",
-                                                     Int(request.command), request.payload.count))
-        }
-        return (socket, pullWait)
     }
 
     /// True only when the session was deliberately closed without a transport failure.

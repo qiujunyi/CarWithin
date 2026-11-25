@@ -92,6 +92,7 @@ final class ZeehoOutput {
                     guard active else { return }
                     report("仪表已连接，等待 CarPlay 画面…")
                     var first = true
+                    var lastSentAt = -Double.infinity
                     var nextFrame = ProcessInfo.processInfo.systemUptime
                     while active {
                         try connection.checkHealth()
@@ -102,9 +103,10 @@ final class ZeehoOutput {
                         try connection.waitForH264Request()
                         nextFrame = ProcessInfo.processInfo.systemUptime + 1.0 / Double(ZeehoOutput.fps)
                         guard active else { break }
+                        let resumed = cfmotoDiagnostic && ProcessInfo.processInfo.systemUptime - lastSentAt >= 1
                         let result = queue.sync { () -> H264EncodedFrame? in
                             guard active, let image = latest else { return nil }
-                            return encode(image, at: ProcessInfo.processInfo.systemUptime, forceKeyframe: first)
+                            return encode(image, at: ProcessInfo.processInfo.systemUptime, forceKeyframe: first || resumed)
                         }
                         guard let result else {
                             // Preserve the pending pull request until an encodable frame is available.
@@ -118,11 +120,13 @@ final class ZeehoOutput {
                             }
                             guard let recovered else { throw TailingError.timeout("等待 H.264 编码画面") }
                             try connection.sendH264(recovered.data)
+                            lastSentAt = ProcessInfo.processInfo.systemUptime
                             first = false
                             report("正在投屏 · 1024×\(videoHeight) · H.264")
                             continue
                         }
                         try connection.sendH264(result.data)
+                        lastSentAt = ProcessInfo.processInfo.systemUptime
                         first = false
                         report("正在投屏 · 1024×\(videoHeight) · H.264")
                     }

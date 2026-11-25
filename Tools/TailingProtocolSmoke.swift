@@ -40,6 +40,7 @@ struct TailingTests {
         try frames()
         try identity()
         try socketCancellation()
+        try pausedVideoPull()
         let stableIdentity = try TailingIdentity.generate()
         try simulatedInstrument(identity: stableIdentity, idleControlFrames: 11)
         try simulatedInstrument(identity: stableIdentity)
@@ -108,6 +109,35 @@ struct TailingTests {
         }
         server.close()
         try expect(group.wait(timeout: .now() + 1) == .success && result.get() != nil, "关闭必须唤醒accept")
+    }
+
+    // BACK can pause pull requests beyond the former five-second timeout.
+    private static func pausedVideoPull() throws {
+        let server = try TailingSocket.listening(localIP: "127.0.0.1", port: 0)
+        defer { server.close() }
+        let client = try TailingSocket.create()
+        defer { client.close() }
+        try client.connect(localIP: "127.0.0.1", remoteIP: "127.0.0.1", port: server.localPort)
+        let accepted = try server.accept(remoteIP: "127.0.0.1")
+        defer { accepted.close() }
+        let result = Box<Error?>(nil)
+        let finished = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            defer { finished.signal() }
+            do {
+                var header = true
+                let frame = try TailingProtocol.readAuxiliary { count in
+                    defer { header = false }
+                    return try accepted.readExactly(count, timeout: 5, waitForFirstByte: header)
+                }
+                try expect(frame.command == 0x72, "恢复后读取完整拉帧请求")
+            } catch { result.set(error) }
+        }
+        try expect(finished.wait(timeout: .now() + 6) == .timedOut, "空闲六秒不终止视频读取")
+        try client.write(TailingProtocol.auxiliary(0x72))
+        try expect(finished.wait(timeout: .now() + 2) == .success, "SET 后恢复拉帧")
+        if let error = result.get() { throw error }
+        print("PASS: 视频空闲六秒后恢复取帧")
     }
 
     private static func simulatedInstrument(identity: TailingIdentity, idleControlFrames: Int = 0,
