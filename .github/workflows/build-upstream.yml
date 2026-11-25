@@ -14,6 +14,7 @@ jobs:
       - name: Build iPhone application
         run: |
           set -euo pipefail
+          python3 Tools/generate_project.py
           xcodebuild -project TDSCarKit.xcodeproj -scheme TDSCarKit -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" TDS_WIFI_ENTITLEMENTS="" build
       - name: Package IPA
         run: |
