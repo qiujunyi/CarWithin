@@ -184,6 +184,8 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     private let keepAlive = BackgroundKeepAlive()
     private let keepAliveSwitch = UISwitch()
     private let cfmotoHandlebarSwitch = UISwitch()
+    private let cfmotoVolumeNavigationSwitch = UISwitch()
+    private let cfmotoVolumeNavigation = CFMotoVolumeNavigation()
     private let cfmotoHandlebarBridge = CFMotoHandlebarMediaBridge()
     private let headUnitOutput = ChoiceMenu(items: ["浏览器", "CarLife", "AirPlay", "台铃 4.3 寸", "九号 5 寸", "极核 6.2 寸", "九号 7 寸", "九号 4.3 寸（实验）", "春风 150SC-F"])
     private enum HeadUnitOutput: Int {
@@ -331,6 +333,14 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         bluetoothSetupSwitch.addTarget(self, action: #selector(modeChanged), for: .valueChanged)
         cfmotoHandlebarSwitch.isOn = UserDefaults.standard.bool(forKey: "cfmotoHandlebarAVRCP")
         cfmotoHandlebarSwitch.addTarget(self, action: #selector(cfmotoHandlebarChanged), for: .valueChanged)
+        cfmotoVolumeNavigationSwitch.isOn = UserDefaults.standard.bool(forKey: "cfmotoVolumeNavigation")
+        cfmotoVolumeNavigationSwitch.addTarget(self, action: #selector(cfmotoVolumeNavigationChanged), for: .valueChanged)
+        cfmotoVolumeNavigation.onChange = { [weak self] oldVolume, newVolume, control in
+            guard let self, self.running, self.outputMode == .cfmoto,
+                  self.cfmotoVolumeNavigationSwitch.isOn else { return }
+            self.log(String(format: "春风音量诊断：%.3f → %.3f，CarPlay %@", oldVolume, newVolume, control.title))
+            self.receiver.press(control)
+        }
         cfmotoHandlebarBridge.onKey = { [weak self] key in
             guard let self, self.running, self.outputMode == .cfmoto,
                   self.cfmotoHandlebarSwitch.isOn else { return }
@@ -1630,6 +1640,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         updateCarLifeStatus("等待启动 CarPlay。")
         running = false
         cfmotoHandlebarBridge.stop()
+        cfmotoVolumeNavigation.stop()
         sessionHasVehicleButton = false
         screenAdaptation?.cancel(); screenAdaptation = nil
         reportedScreen = nil; primaryViewer = nil; pendingRestartReason = nil
@@ -2007,12 +2018,25 @@ extension ReceiverViewController {
         UserDefaults.standard.set(tailingAddressField.text ?? "", forKey: "tailingAddress")
         refreshVideoOutputSummary()
     }
+    @objc private func cfmotoVolumeNavigationChanged() {
+        UserDefaults.standard.set(cfmotoVolumeNavigationSwitch.isOn, forKey: "cfmotoVolumeNavigation")
+        updateCFMotoHandlebarCapture()
+    }
+
     @objc private func cfmotoHandlebarChanged() {
         UserDefaults.standard.set(cfmotoHandlebarSwitch.isOn, forKey: "cfmotoHandlebarAVRCP")
         updateCFMotoHandlebarCapture()
     }
 
     private func updateCFMotoHandlebarCapture() {
+        let observeVolume = running && outputMode == .cfmoto && cfmotoVolumeNavigationSwitch.isOn
+        if observeVolume {
+            if cfmotoVolumeNavigation.start() {
+                log("春风音量诊断：已开始观察系统媒体音量；音量＋→上一项，音量－→下一项。iPhone 自身音量键也会触发。")
+            }
+        } else {
+            cfmotoVolumeNavigation.stop()
+        }
         let shouldCapture = running && outputMode == .cfmoto && cfmotoHandlebarSwitch.isOn
         if shouldCapture {
             cfmotoHandlebarBridge.start()
@@ -2603,10 +2627,11 @@ extension ReceiverViewController {
             case .airPlay: return airPlayOutputSections()
             case .tailing: return tailingOutputSections()
             case .cfmoto:
-                return [SettingsSection("春风 150SC-F", footer: "先配对春风仪表蓝牙并加入仪表 Wi-Fi，然后打开投屏并启动 CarPlay。媒体键映射是实验功能：iOS 可能将蓝牙按键交给其他音频 App。", [
+                return [SettingsSection("春风 150SC-F", footer: "先配对春风仪表蓝牙并加入仪表 Wi-Fi，再启动 CarPlay。音量键实验：音量＋切上一项，音量－切下一项；会实际改变媒体音量，iPhone 自身音量键也可能触发；不自动恢复音量。iOS 后台可能暂停监听。", [
                     .field("仪表 IP 地址", zeehoAddressField, placeholder: "192.168.0.1"),
                     .action("扫描仪表二维码", icon: ("qrcode.viewfinder", .systemBlue)) { [unowned self] in self.scanCFMotoQRCode() },
                     .control("车把蓝牙媒体键控制 CarPlay（实验）", cfmotoHandlebarSwitch),
+                    .control("车把音量键控制 CarPlay（实验）", cfmotoVolumeNavigationSwitch),
                     .note(zeehoStatus)
                 ])]
             case .zeeho:
@@ -3251,5 +3276,48 @@ private final class CFMotoHandlebarMediaBridge {
             command.removeTarget(handler)
         }
         registered.removeAll()
+    }
+}
+
+
+private final class CFMotoVolumeNavigation {
+    var onChange: ((Float, Float, CarPlayControl) -> Void)?
+    private var volumeObservation: NSKeyValueObservation?
+    private var previousVolume: Float?
+    private var lastEventAt: TimeInterval = 0
+
+    /// Observes public media-volume changes only. Never forces AVAudioSession
+    /// activation, changes output route, or writes volume back to the system.
+    @discardableResult func start() -> Bool {
+        guard volumeObservation == nil else { return false }
+        let session = AVAudioSession.sharedInstance()
+        previousVolume = session.outputVolume
+        lastEventAt = 0
+        volumeObservation = session.observe(\.outputVolume, options: [.new]) { [weak self] session, change in
+            guard let self, let newVolume = change.newValue else { return }
+            DispatchQueue.main.async { [weak self] in
+                self?.handle(newVolume)
+            }
+        }
+        return true
+    }
+
+    func stop() {
+        volumeObservation?.invalidate()
+        volumeObservation = nil
+        previousVolume = nil
+        lastEventAt = 0
+    }
+
+    private func handle(_ newVolume: Float) {
+        guard volumeObservation != nil, let oldVolume = previousVolume else { return }
+        previousVolume = newVolume
+        let delta = newVolume - oldVolume
+        // Ignore tiny fluctuations and rapid duplicates from route updates.
+        guard abs(delta) >= 0.008 else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastEventAt >= 0.10 else { return }
+        lastEventAt = now
+        onChange?(oldVolume, newVolume, delta > 0 ? .knobPrevious : .knobNext)
     }
 }
