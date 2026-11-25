@@ -41,6 +41,7 @@ struct TailingTests {
         try identity()
         try socketCancellation()
         try pausedVideoPull()
+        try cfmotoReconnect()
         let stableIdentity = try TailingIdentity.generate()
         try simulatedInstrument(identity: stableIdentity, idleControlFrames: 11)
         try simulatedInstrument(identity: stableIdentity)
@@ -138,6 +139,80 @@ struct TailingTests {
         try expect(finished.wait(timeout: .now() + 2) == .success, "SET 后恢复拉帧")
         if let error = result.get() { throw error }
         print("PASS: 视频空闲六秒后恢复取帧")
+    }
+
+    private static func cfmotoReconnect() throws {
+        let announcement = try TailingSocket.listening(localIP: "127.0.0.1", port: 0)
+        defer { announcement.close() }
+        let reservations = try (0..<3).map { _ in try TailingSocket.listening(localIP: "127.0.0.1", port: 0) }
+        let ports = try TailingPorts(control: reservations[0].localPort, auxiliary: reservations[1].localPort,
+                                    video: reservations[2].localPort, announcement: announcement.localPort)
+        reservations.forEach { $0.close() }
+        let connection = TailingConnection(localIP: "127.0.0.1", targetIP: "127.0.0.1", profile: .cfmoto150scf,
+            phone: TailingPhoneInfo(package: "test", versionCode: 1, model: "iPhone", systemVersion: "17", width: 1024, height: 512, rotation: 1),
+            ports: ports, log: { print($0) })
+        defer { connection.close() }
+        let started = DispatchSemaphore(value: 0)
+        let startError = Box<Error?>(nil)
+        DispatchQueue.global().async {
+            defer { started.signal() }
+            do { try connection.start() } catch { startError.set(error) }
+        }
+        let probe = try announcement.accept(remoteIP: "127.0.0.1")
+        defer { probe.close() }
+        let header = try probe.readExactly(16)
+        _ = try probe.readExactly(Int(header.uint16LE(4)) - 16)
+        var reply = Data(count: 16); reply[0] = 0x11; reply[4] = 16
+        try probe.write(reply)
+        func connect(_ port: UInt16) throws -> TailingSocket {
+            let socket = try TailingSocket.create()
+            try socket.connect(localIP: "127.0.0.1", remoteIP: "127.0.0.1", port: port)
+            return socket
+        }
+        let frame = Data([0, 0, 0, 1, 0x65, 1, 2, 3])
+        for cycle in 0..<3 {
+            let control = try connect(ports.control)
+            let media = try connect(ports.auxiliary)
+            let video = try connect(ports.video)
+            defer { control.close(); media.close(); video.close() }
+            try control.write(TailingProtocol.control(0x10010, payload: TailingProtocol.json(["HUName": "CFMOTO-TEST", "HUID": "test-huid"])))
+            try expect(try TailingProtocol.readControl { try control.readExactly($0) }.command == 0x10011, "重新回应控制身份")
+            var config = Data(); config.appendLE(UInt16(1024)); config.appendLE(UInt16(515))
+            config.appendLE(UInt32(30)); config.appendLE(UInt32(2))
+            try media.write(TailingProtocol.auxiliary(0x10, payload: config))
+            try expect(try TailingProtocol.readAuxiliary { try media.readExactly($0) }.command == 0x11, "重新协商媒体")
+            try media.write(TailingProtocol.auxiliary(0x70))
+            try expect(try TailingProtocol.readAuxiliary { try media.readExactly($0) }.command == 0x71, "重新启动媒体")
+            if cycle == 0 {
+                try expect(started.wait(timeout: .now() + 3) == .success, "首次握手完成")
+                if let error = startError.get() { throw error }
+            }
+            let sent = DispatchSemaphore(value: 0)
+            let error = Box<Error?>(nil)
+            DispatchQueue.global().async {
+                defer { sent.signal() }
+                do { try connection.waitForH264Request(); try connection.sendH264(frame) }
+                catch let e { error.set(e) }
+            }
+            try video.write(TailingProtocol.auxiliary(0x72))
+            let count = Int(try video.readExactly(4).uint32LE(0))
+            let body = try video.readExactly(count)
+            try expect(Data(body.dropFirst(4)) == frame, "回连后完整视频帧")
+            try expect(sent.wait(timeout: .now() + 2) == .success, "视频发送完成")
+            if let e = error.get() { throw e }
+            // Reproduce BACK: media closes first, then the remaining peers.
+            media.close(); control.close(); video.close()
+            Thread.sleep(forTimeInterval: 0.15)
+            try connection.checkHealth()
+        }
+        let cancelled = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            defer { cancelled.signal() }
+            try? connection.waitForH264Request()
+        }
+        connection.close()
+        try expect(cancelled.wait(timeout: .now() + 2) == .success, "手动停止唤醒等待视频回连")
+        print("PASS: CFMOTO 三轮媒体/控制/视频全断开回连与停止取消")
     }
 
     private static func simulatedInstrument(identity: TailingIdentity, idleControlFrames: Int = 0,

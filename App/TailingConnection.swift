@@ -56,6 +56,8 @@ final class TailingConnection: @unchecked Sendable {
     private var huid: String?
     private var signedHUID: Data?
     private var video: TailingSocket?
+    private var pulledVideo: TailingSocket?
+    private var channelPorts: [ObjectIdentifier: UInt16] = [:]
     private var reverseControl: TailingSocket?
     private var sentH264Prefix = false
     private var cfmotoVideoFrameIndex: UInt32 = 0
@@ -132,11 +134,15 @@ final class TailingConnection: @unchecked Sendable {
                 throw TailingError.protocolFailure("仪表未接受 PXC 投屏请求")
             }
         }
-        let deadline = Date().addingTimeInterval(20)
+        var deadline = Date().addingTimeInterval(20)
         condition.lock()
         defer { condition.unlock() }
         while !closed && failure == nil && (signedHUID == nil || video == nil || !mediaStarted || (isZeeho && !profile.isCFMotoDiagnostic && reverseControl == nil)) {
             if !condition.wait(until: deadline) {
+                if profile.isCFMotoDiagnostic {
+                    deadline = Date().addingTimeInterval(20)
+                    continue // Keep all listeners available until the user stops.
+                }
                 let state = profile.isCFMotoDiagnostic ? "；" + diagnosticStateLocked() : ""
                 throw TailingError.timeout("媒体会话未就绪" + state + "，请退出官方投屏并重新开启仪表投屏")
             }
@@ -164,7 +170,15 @@ final class TailingConnection: @unchecked Sendable {
 
     // 视频请求与发送由同一个会话任务顺序执行。
     func sendH264(_ accessUnit: Data) throws {
-        let socket = try videoSocket()
+        let socket: TailingSocket
+        if profile.isCFMotoDiagnostic {
+            condition.lock()
+            let requestedSocket = pulledVideo
+            pulledVideo = nil
+            condition.unlock()
+            guard let requestedSocket else { return }
+            socket = requestedSocket
+        } else { socket = try videoSocket() }
         let packet: Data
         if profile.isCFMotoDiagnostic {
             packet = try TailingProtocol.h264Indexed(accessUnit, frameIndex: cfmotoVideoFrameIndex)
@@ -176,6 +190,7 @@ final class TailingConnection: @unchecked Sendable {
             try socket.write(packet)
             sentH264Prefix = true
         } catch {
+            if retireCFMotoChannel(socket, port: ports.video, error: error) { return }
             throw terminalError(or: TailingError.channel("发送 H.264", error))
         }
     }
@@ -216,19 +231,7 @@ final class TailingConnection: @unchecked Sendable {
                         waitForFirstByte: profile.isCFMotoDiagnostic && readingHeader)
                 }
             } catch {
-                if profile.isCFMotoDiagnostic, let transport = error as? TailingError,
-                   case .closed = transport {
-                    condition.lock()
-                    let recover = !closed && failure == nil
-                    if recover && video === socket { video = nil }
-                    if recover { resources.removeAll { $0 === socket } }
-                    condition.unlock()
-                    if recover {
-                        socket.close()
-                        log("春风视频通道已退出，保留会话等待仪表回连（SET）")
-                        continue
-                    }
-                }
+                if retireCFMotoChannel(socket, port: ports.video, error: error) { continue }
                 throw terminalError(or: TailingError.channel("等待视频拉帧请求", error))
             }
             let pullWait = ProcessInfo.processInfo.systemUptime - pullStarted
@@ -238,6 +241,12 @@ final class TailingConnection: @unchecked Sendable {
             }
             if profile.isCFMotoDiagnostic && pullWait >= 1 {
                 log("春风仪表恢复取帧，继续投屏")
+            }
+            if profile.isCFMotoDiagnostic {
+                condition.lock()
+                guard video === socket else { condition.unlock(); continue }
+                pulledVideo = socket
+                condition.unlock()
             }
             return (socket, pullWait)
         }
@@ -311,6 +320,7 @@ final class TailingConnection: @unchecked Sendable {
                 let socket = try tracked(server.accept(remoteIP: targetIP))
                 if isZeeho { log("\(dashboard) TCP\(port) 已回连") }
                 condition.lock()
+                if profile.isCFMotoDiagnostic { channelPorts[ObjectIdentifier(socket)] = port }
                 if port == ports.control { controlConnected = true }
                 if port == ports.auxiliary { auxiliaryConnected = true }
                 condition.broadcast()
@@ -321,7 +331,10 @@ final class TailingConnection: @unchecked Sendable {
                         let previous = video
                         video = socket
                         if profile.isCFMotoDiagnostic { resumeKeyframePending = true }
-                        if let previous { resources.removeAll { $0 === previous } }
+                        if let previous {
+                            resources.removeAll { $0 === previous }
+                            channelPorts.removeValue(forKey: ObjectIdentifier(previous))
+                        }
                         condition.broadcast()
                         condition.unlock()
                         previous?.close()
@@ -336,7 +349,9 @@ final class TailingConnection: @unchecked Sendable {
                             else { try control(socket) }
                         } catch {
                             let channel = port == ports.auxiliary ? "媒体控制 TCP\(port)" : "会话控制 TCP\(port)"
-                            fail(TailingError.channel(channel, error))
+                            if !retireCFMotoChannel(socket, port: port, error: error) {
+                                fail(TailingError.channel(channel, error))
+                            }
                         }
                     }
                 }
@@ -690,6 +705,28 @@ final class TailingConnection: @unchecked Sendable {
                            Int(ports.auxiliary), response, payload.count))
             }
         }
+    }
+
+    /// A dashboard peer closing is not an app Stop. Close only that accepted
+    /// socket; listener sockets are never passed here. Other channels survive.
+    private func retireCFMotoChannel(_ socket: TailingSocket, port: UInt16, error: Error) -> Bool {
+        guard profile.isCFMotoDiagnostic else { return false }
+        condition.lock()
+        guard !closed && failure == nil else { condition.unlock(); return false }
+        let known = channelPorts.removeValue(forKey: ObjectIdentifier(socket)) != nil
+        resources.removeAll { $0 === socket }
+        if video === socket { video = nil }
+        if pulledVideo === socket { pulledVideo = nil }
+        controlConnected = channelPorts.values.contains(ports.control)
+        auxiliaryConnected = channelPorts.values.contains(ports.auxiliary)
+        resumeKeyframePending = true
+        condition.broadcast()
+        condition.unlock()
+        socket.close()
+        if known {
+            log("春风 TCP\(port) 单通道断开：\(error.localizedDescription)；10920/10921/10922 保持监听，等待 SET 回连")
+        }
+        return true
     }
 
     private func checkLocked() throws {
